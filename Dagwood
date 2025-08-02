@@ -1,0 +1,59 @@
+project dache
+
+set CC        gcc
+set BUILD_DIR build
+set LINK_OPTS [list -larchive -lcrypto -lz]
+set OUT       $::BUILD_DIR/dache
+set OPTS      [list -g -O0 -std=c11 -D_POSIX_C_SOURCE=200809L]
+set TARGETS   [glob src/*.c src/*.h]
+set C_CMDS    compile_commands.json
+
+set STANDARD_OPTS [list -std=c11 -Os -D_POSIX_C_SOURCE=200809L \
+		       -Wall -Wextra -Wpedantic \
+		       -Wstrict-overflow -fno-strict-aliasing]
+set DEBUG_OPTS   [list -g -O0 -DDEBUG {*}$STANDARD_OPTS]
+set RELEASE_OPTS [list -O2 -DNDEBUG -s -march=native {*}$STANDARD_OPTS]
+
+
+task pre-reqs {
+    run {
+	mkdir -p $::BUILD_DIR
+    }
+}
+
+task build {
+    description "Build Dache CLI"
+    depends_on  pre-reqs
+    inputs      $::TARGETS
+    outputs     $::OUT
+    run {
+	$::CC $::TARGETS $::DEBUG_OPTS $::LINK_OPTS -o $::OUT
+    }
+}
+
+task bear {
+    depends_on build
+    inputs     $::dache::build::inputs
+    outputs    $::C_CMDS
+    run {
+	bear -- $::dache::build::run
+    }
+}
+
+task fmt {
+    depends_on build
+    inputs $::TARGETS
+    outputs .clang-format
+    run {
+	set -e
+	clang-format -i $::TARGETS
+	touch .clang-format
+    }
+}
+
+command clean {
+    run {
+	rm -rf $::BUILD_DIR
+    }
+}
+

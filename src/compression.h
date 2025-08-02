@@ -6,5 +6,6 @@
 bool write_archive(const char** src, const char* dest);
 bool unarchive(const char* src, const char* dest);
 bool compress_file(const char* src, const char* dest);
+bool decompress_file(const char* src, const char* dest);
 
 #endif

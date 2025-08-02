@@ -6,11 +6,10 @@
 
 #include "dache.h"
 
-
-int digest_from_file(EVP_MD_CTX* ctx,
-		     const EVP_MD* md,
-		     const char* path,
-		     uint8_t out[32]) {
+static int digest(EVP_MD_CTX* ctx,
+		  const EVP_MD* md,
+		  const char* path,
+		  uint8_t out[32]) {
   FILE* f = fopen(path, "rb");
 
   if (!f) {
@@ -23,7 +22,7 @@ int digest_from_file(EVP_MD_CTX* ctx,
 
   while ((n = fread(buff, 1, sizeof(buff), f)) > 0) {
     if (!EVP_DigestUpdate(ctx, buff, n)) {
-      fclose(f); 
+      fclose(f);
       return -4;
     }
   }
@@ -46,7 +45,7 @@ int dache_cache_key(const char** envv,
   }
 
   const EVP_MD* md = EVP_sha256();
-  
+
   if (!EVP_DigestInit_ex(ctx, md, NULL)) {
     EVP_MD_CTX_free(ctx);
     return -2;
@@ -65,7 +64,7 @@ int dache_cache_key(const char** envv,
       EVP_MD_CTX_free(ctx);
       return -4;
     }
-    
+
     if (!EVP_DigestUpdate(ctx, "\n", 1)) {
       EVP_MD_CTX_free(ctx);
       return -5;
@@ -76,10 +75,11 @@ int dache_cache_key(const char** envv,
     EVP_MD_CTX_free(ctx);
     return -6;
   }
-  
+
   for (size_t j = 0; j < inputc; j++) {
     uint8_t file_digest[32];
-    int code = digest_from_file(ctx, md, inputv[j], file_digest);
+    int code = digest(ctx, md, inputv[j], file_digest);
+
     if (code != 0) {
       fprintf(stderr, "failed %s\n", inputv[j]);
       EVP_MD_CTX_free(ctx);
@@ -99,6 +99,7 @@ int dache_cache_key(const char** envv,
 
   for (size_t k = 0; k < commandc; k++) {
     if (!EVP_DigestUpdate(ctx, commandv[k], strlen(commandv[k]))) {
+      EVP_MD_CTX_free(ctx);
       return -10;
     }
   }
@@ -111,8 +112,14 @@ int dache_cache_key(const char** envv,
   unsigned int len = 0;
 
   if (!EVP_DigestFinal_ex(ctx, out_digest, &len)) {
+    EVP_MD_CTX_free(ctx);
     return -12;
   }
-  
+
+  EVP_MD_CTX_free(ctx);
   return 0;
+}
+
+bool dache_cache_get(dache* d, uint8_t digest[32]) {
+  return false;
 }

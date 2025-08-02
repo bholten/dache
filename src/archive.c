@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <zlib.h>
 
 #include "compression.h"
 
@@ -54,7 +55,7 @@ bool write_archive(const char** src, const char* dest) {
   archive_entry_free(entry);
   archive_write_close(a);
   archive_write_free(a);
-  
+
   return true;
 }
 
@@ -75,7 +76,7 @@ static int copy_data(struct archive* ar, struct archive* aw) {
     }
 
     r = archive_write_data_block(aw, buff, size, offset);
-    
+
     if (r < ARCHIVE_OK) {
       fprintf(stderr, "%s\n", archive_error_string(aw));
       return r;
@@ -83,13 +84,13 @@ static int copy_data(struct archive* ar, struct archive* aw) {
   }
 }
 
-bool compression_unarchive(const char* src, const char* dest) {
+bool unarchive(const char* src, const char* dest) {
   struct archive* a;
   struct archive* ext;
   struct archive_entry* entry;
   int r;
   int flags = ARCHIVE_EXTRACT_TIME;
-   
+
   a = archive_read_new();
   ext = archive_write_disk_new();
 
@@ -138,6 +139,68 @@ bool compression_unarchive(const char* src, const char* dest) {
   archive_read_free(a);
   archive_write_close(ext);
   archive_write_free(ext);
-  
+
+  return true;
+}
+
+bool compress_file(const char* src, const char* dest) {
+  FILE *in = fopen(src, "rb");
+
+  if (!in) {
+    perror("fopen src");
+    return false;
+  }
+
+  gzFile out = gzopen(dest, "wb");
+
+  if (!out) {
+    perror("gzopen dest");
+    fclose(in);
+    return false;
+  }
+
+  char buffer[65536];
+  size_t read;
+
+  while ((read = fread(buffer, 1, sizeof(buffer), in)) > 0) {
+    if (gzwrite(out, buffer, (unsigned int) read) != (int) read) {
+      perror("gzwrite");
+      gzclose(out);
+      fclose(in);
+      return false;
+    }
+  }
+
+  fclose(in);
+  gzclose(out);
+  return true;
+}
+
+bool decompress_file(const char *src, const char *dest) {
+  gzFile in = gzopen(src, "rb");
+
+  if (!in) {
+    perror("gzopen src");
+    return false;
+  }
+
+  FILE *out = fopen(dest, "wb");
+
+  if (!out) {
+    perror("fopen src");
+    gzclose(in);
+    return false;
+  }
+
+  char buffer[65536];
+  int read;
+
+  while ((read = gzread(in, buffer, sizeof(buffer))) > 0) {
+    fwrite(buffer, 1, read, out);
+  }
+
+  gzclose(in);
+  fclose(out);
+
   return true;
 }

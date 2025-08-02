@@ -1,17 +1,10 @@
 #ifndef DACHE_H
 #define DACHE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
-typedef struct cache {
-  const char** envs;
-  int env_count;
-  const char** input_paths;
-  int input_cound;
-  const char** command_argv;
-  int command_argc;
-  uint8_t out_digest[32];
-} cache;
+typedef struct dache dache;
 
 int dache_cache_key(const char** envv,
 		    int envc,
@@ -20,6 +13,8 @@ int dache_cache_key(const char** envv,
 		    const char** commandv,
 		    int commandc,
 		    uint8_t out_digest[32]);
+
+bool dache_cache_get(dache* d, uint8_t digest[32]);
 
 
 /*

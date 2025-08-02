@@ -2,13 +2,24 @@ General idea:
 
 Build cache systems are TOO COMPLICATED.
 
-Dache is a simple thing: just give inputs, outputs, env vars, and the command.
+Dache is a simple thing: just give inputs, outputs, env vars, and the
+command.
 
 That's it.
 
-It will calculate a cache key from the inputs and environment variables, if found, will restore the cached outputs; if not, it will run the command and cache.
+It will calculate a cache key from the inputs and environment
+variables, if found, will restore the cached outputs; if not, it will
+run the command and cache.
 
-It does not try to canonicalize the command. It does not try to canonicalize the environment. It does not try to "infer" what dotfiles your build tool implicitly touches by listening to syscalls. If you give Dache that information, consistently, it will cache; and if your build tool does that nonsense, that's on them, not us. If you understand your build tool -- tell us what it touches! We'll add it to the cache key. If your build tool doesn't even produce an artifact, but does something like upload a container to a local registry (looking at you, Docker) -- well, that's not cachable. Stop that.
+It does not try to canonicalize the command. It does not try to
+canonicalize the environment. It does not try to "infer" what dotfiles
+your build tool implicitly touches by listening to syscalls. If you
+give Dache that information, consistently, it will cache; and if your
+build tool does that nonsense, that's on them, not us. If you
+understand your build tool -- tell us what it touches! We'll add it to
+the cache key. If your build tool doesn't even produce an artifact,
+but does something like upload a container to a local registry
+(looking at you, Docker) -- well, that's not cachable. Stop that.
 
 General workflow:
 

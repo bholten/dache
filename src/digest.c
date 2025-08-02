@@ -8,7 +8,7 @@
 
 #include "digest.h"
 
-int dache_digest_from_file(const char* path, uint8_t out[32]) {
+int digest_from_file(const char* path, uint8_t out[32]) {
   FILE* f = fopen(path, "rb");
 
   if (!f) return -1;
@@ -52,7 +52,7 @@ int dache_digest_from_file(const char* path, uint8_t out[32]) {
   return 0;
 }
 
-void dache_digest_to_hex(const uint8_t digest[32], char hex_out[65]) {
+void digest_to_hex(const uint8_t digest[32], char hex_out[65]) {
   for (size_t i = 0; i < 32; ++i) {
     sprintf(&hex_out[i * 2], "%02x", digest[i]);
   }
