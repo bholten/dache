@@ -8,7 +8,6 @@
 
 //#include "compression.h"
 #include "dache.h"
-#include "digest.h"
 
 #define DACHE_VERSION "0.0.1"
 
@@ -36,45 +35,43 @@ void print_version(void) {
 }
 
 int parse_args(int argc, const char **argv) {
-  const char* describe  = NULL;
-  const char* directory = NULL;
-  const char* file      = NULL;
-  const char* task_name = NULL;
+  const char *describe = NULL;
+  const char *directory = NULL;
+  const char *file = NULL;
+  const char *task_name = NULL;
   int list = 0;
   int repl = 0;
-  int dot  = 0;
+  int dot = 0;
 
   struct option long_options[] = {
-    {"directory", required_argument, 0, 'C'},
-    {"list",      no_argument,       0, 'l'},
-    {"describe",  required_argument, 0, 'd'},
-    {"file",      required_argument, 0, 'f'},
-    {"dot",       optional_argument, 0, 't'},
-    {"repl",      no_argument,       0, 'r'},
-    {"help",      no_argument,       0, 'h'},
-    {"version",   no_argument,       0, 'v'},
-    {0, 0, 0, 0}
+      {"directory", required_argument, 0, 'C'},
+      {"list",      no_argument,       0, 'l'},
+      {"describe",  required_argument, 0, 'd'},
+      {"file",      required_argument, 0, 'f'},
+      {"dot",       optional_argument, 0, 't'},
+      {"repl",      no_argument,       0, 'r'},
+      {"help",      no_argument,       0, 'h'},
+      {"version",   no_argument,       0, 'v'},
+      {0,           0,                 0, 0  }
   };
 
   int opt;
 
-  while ((opt = getopt_long(argc, (char * const *) argv, "C:ldft:rh",
-			    long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, (char *const *)argv, "C:ldft:rh",
+                            long_options, NULL)) != -1) {
     switch (opt) {
     case 'C': directory = optarg; break;
-    case 'd': describe  = optarg; break;
-    case 'f': file      = optarg; break;
-    case 'l': list      = 1; break;
-    case 'r': repl      = 1; break;
-    case 'h':
-      show_help();
-      return EXIT_SUCCESS;
+    case 'd': describe = optarg; break;
+    case 'f': file = optarg; break;
+    case 'l': list = 1; break;
+    case 'r': repl = 1; break;
+    case 'h': show_help(); return EXIT_SUCCESS;
     case 't':
-      dot  = 1;
+      dot = 1;
       task_name = optarg;
       break;
     case 'v': print_version(); return EXIT_SUCCESS;
-    default: show_help();      return EXIT_FAILURE;
+    default: show_help(); return EXIT_FAILURE;
     }
   }
 
@@ -114,20 +111,16 @@ int parse_args(int argc, const char **argv) {
   return result;
 }
 
-
-int main(int argc, const char** argv) {
+int main(int argc, const char **argv) {
   uint8_t digest[32];
   char hex[65];
 
-  const char* envv[2]     = {"PATH=/usr/bin/", "CC=gcc"};
-  const char* inputv[2]   = {"src/main.c", "src/dache.h"};
-  const char* commandv[4] = {"gcc", "test.c", "-o", "test"};
-  
-  int code = dache_cache_key(envv, 2,
-			     inputv, 2,
-			     commandv, 4,
-			     digest);
-  
+  const char *envv[2] = {"PATH=/usr/bin/", "CC=gcc"};
+  const char *inputv[2] = {"src/main.c", "src/dache.h"};
+  const char *commandv[4] = {"gcc", "test.c", "-o", "test"};
+
+  int code = dache_cache_key(envv, 2, inputv, 2, commandv, 4, digest);
+
   if (code != 0) {
     fprintf(stderr, "[dache] error code: %i\n", code);
   }

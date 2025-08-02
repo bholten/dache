@@ -6,11 +6,9 @@
 
 #include "dache.h"
 
-static int digest(EVP_MD_CTX* ctx,
-		  const EVP_MD* md,
-		  const char* path,
-		  uint8_t out[32]) {
-  FILE* f = fopen(path, "rb");
+static int digest(EVP_MD_CTX *ctx, const EVP_MD *md, const char *path,
+                  uint8_t out[32]) {
+  FILE *f = fopen(path, "rb");
 
   if (!f) {
     fprintf(stderr, "[dache] could not open file: %s\n", path);
@@ -31,26 +29,21 @@ static int digest(EVP_MD_CTX* ctx,
   return 0;
 }
 
-int dache_cache_key(const char** envv,
-		    int envc,
-		    const char** inputv,
-		    int inputc,
-		    const char** commandv,
-		    int commandc,
-		    uint8_t out_digest[32]) {
-  EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+int dache_cache_key(const char **envv, int envc, const char **inputv,
+                    int inputc, const char **commandv, int commandc,
+                    uint8_t out_digest[32]) {
+  EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 
   if (!ctx) {
     return -1;
   }
 
-  const EVP_MD* md = EVP_sha256();
+  const EVP_MD *md = EVP_sha256();
 
   if (!EVP_DigestInit_ex(ctx, md, NULL)) {
     EVP_MD_CTX_free(ctx);
     return -2;
   }
-
 
   uint8_t buff[65536];
 
@@ -120,6 +113,6 @@ int dache_cache_key(const char** envv,
   return 0;
 }
 
-bool dache_cache_get(dache* d, uint8_t digest[32]) {
+bool dache_cache_get(dache *d, char key[64]) {
   return false;
 }

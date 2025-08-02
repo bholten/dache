@@ -6,29 +6,21 @@
 
 typedef struct dache dache;
 
-int dache_cache_key(const char** envv,
-		    int envc,
-		    const char** inputv,
-		    int inputc,
-		    const char** commandv,
-		    int commandc,
-		    uint8_t out_digest[32]);
+int dache_cache_key(const char **envv, int envc, const char **inputv,
+                    int inputc, const char **commandv, int commandc,
+                    uint8_t out_digest[32]);
 
-bool dache_cache_get(dache* d, uint8_t digest[32]);
+bool dache_cache_get(dache *d, char key[64]);
+bool dache_cache_put(dache *d, char key[64]);
 
+// Compression
+bool write_archive(const char **src, const char *dest);
+bool unarchive(const char *src, const char *dest);
+bool compress_file(const char *src, const char *dest);
+bool decompress_file(const char *src, const char *dest);
 
-/*
-typedef struct dache {
-  const char* working_directory;
-  const char** objects;
-  const char* trees;
-  const char* manifest;
-  const char* snapshot;
-} dache;
+// Digest
+int digest_from_file(const char *path, uint8_t digset_out[32]);
+void digest_to_hex(const uint8_t digest[32], char hex_out[65]);
 
-
-void dache_init(dache* d);
-void dache_get(dache* d, const char* content, unsigned const char* out);
-void dache_put(dache* d, const char* content);
-*/
 #endif

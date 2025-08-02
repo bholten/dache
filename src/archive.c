@@ -7,14 +7,14 @@
 #include <sys/types.h>
 #include <zlib.h>
 
-#include "compression.h"
+#include "dache.h"
 
-static const char* endline = "\n";
+static const char *endline = "\n";
 static const size_t endline_len = strlen("\n");
 
-bool write_archive(const char** src, const char* dest) {
-  struct archive* a;
-  struct archive_entry* entry;
+bool write_archive(const char **src, const char *dest) {
+  struct archive *a;
+  struct archive_entry *entry;
   struct stat st;
   char buff[8192];
   int len;
@@ -59,9 +59,9 @@ bool write_archive(const char** src, const char* dest) {
   return true;
 }
 
-static int copy_data(struct archive* ar, struct archive* aw) {
+static int copy_data(struct archive *ar, struct archive *aw) {
   int r;
-  const void* buff;
+  const void *buff;
   size_t size;
   la_int64_t offset;
 
@@ -84,10 +84,10 @@ static int copy_data(struct archive* ar, struct archive* aw) {
   }
 }
 
-bool unarchive(const char* src, const char* dest) {
-  struct archive* a;
-  struct archive* ext;
-  struct archive_entry* entry;
+bool unarchive(const char *src, const char *dest) {
+  struct archive *a;
+  struct archive *ext;
+  struct archive_entry *entry;
   int r;
   int flags = ARCHIVE_EXTRACT_TIME;
 
@@ -126,7 +126,7 @@ bool unarchive(const char* src, const char* dest) {
       r = copy_data(a, ext);
 
       if (r != ARCHIVE_OK) {
-	needcr = 1;
+        needcr = 1;
       }
     }
 
@@ -143,7 +143,7 @@ bool unarchive(const char* src, const char* dest) {
   return true;
 }
 
-bool compress_file(const char* src, const char* dest) {
+bool compress_file(const char *src, const char *dest) {
   FILE *in = fopen(src, "rb");
 
   if (!in) {
@@ -163,7 +163,7 @@ bool compress_file(const char* src, const char* dest) {
   size_t read;
 
   while ((read = fread(buffer, 1, sizeof(buffer), in)) > 0) {
-    if (gzwrite(out, buffer, (unsigned int) read) != (int) read) {
+    if (gzwrite(out, buffer, (unsigned int)read) != (int)read) {
       perror("gzwrite");
       gzclose(out);
       fclose(in);
