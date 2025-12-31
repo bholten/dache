@@ -582,11 +582,13 @@ static char *json_read_file(const char *path) {
 }
 
 static const char *json_skip_ws(const char *p) {
-  while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+  while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+    p++;
   return p;
 }
 
-static const char *json_parse_string(const char *p, char *out, size_t out_size) {
+static const char *json_parse_string(const char *p, char *out,
+                                     size_t out_size) {
   p = json_skip_ws(p);
   if (*p != '"') return NULL;
   p++;
@@ -643,8 +645,14 @@ blob_manifest *blob_manifest_read(const char *path) {
   while (*p) {
     p = json_skip_ws(p);
     if (*p == ']') break;
-    if (*p == ',') { p++; continue; }
-    if (*p != '{') { p++; continue; }
+    if (*p == ',') {
+      p++;
+      continue;
+    }
+    if (*p != '{') {
+      p++;
+      continue;
+    }
     p++;
 
     blob_entry entry = {0};
@@ -653,8 +661,14 @@ blob_manifest *blob_manifest_read(const char *path) {
     while (*p && *p != '}') {
       p = json_skip_ws(p);
       if (*p == '}') break;
-      if (*p == ',') { p++; continue; }
-      if (*p != '"') { p++; continue; }
+      if (*p == ',') {
+        p++;
+        continue;
+      }
+      if (*p != '"') {
+        p++;
+        continue;
+      }
 
       char key[64];
       p = json_parse_string(p, key, sizeof(key));

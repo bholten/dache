@@ -3,14 +3,14 @@ project dache
 let CC        gcc
 let BUILD_DIR build
 let LINK_OPTS [list -larchive -lcrypto -lz]
-let OUT       $BUILD_DIR/dache
-let TARGETS   [glob src/*.c src/*.h]
+let OUT       $dache::BUILD_DIR/dache
+let TARGETS   [glob src/*.c]
 let C_CMDS    compile_commands.json
 let STANDARD_OPTS [list -std=c11 -Os -D_POSIX_C_SOURCE=200809L \
-                        -Wall -Wextra -Wpedantic \
-                        -Wstrict-overflow -fno-strict-aliasing]
-let DEBUG_OPTS   [list -g -O0 -DDEBUG @$STANDARD_OPTS]
-let RELEASE_OPTS [list -O2 -DNDEBUG -s -march=native @$STANDARD_OPTS]
+                          -Wall -Wextra -Wpedantic \
+                          -Wstrict-overflow -fno-strict-aliasing]
+let DEBUG_OPTS   [list -g -O0 -DDEBUG @$dache::STANDARD_OPTS]
+let RELEASE_OPTS [list -O2 -DNDEBUG -s -march=native @$dache::STANDARD_OPTS]
 
 task prereqs {
     run {
@@ -23,24 +23,9 @@ task fmt {
     inputs $dache::TARGETS
     outputs .clang-format
     run {
-        set -e
+        set -ex
         clang-format -i $dache::TARGETS
         touch .clang-format
-    }
-}
-
-proc cc_compile {src output includes} {
-    var inc
-    var header_flags ""
-
-    if [empty? $includes] {
-        set! inc {}
-    } else {
-        set! inc $includes
-    }
-    
-    foreach {dir} $incs {
-        String::append header_flags " -I${dir}"
     }
 }
 
@@ -58,18 +43,25 @@ proc build {name build_args} {
     }]
 }
 
+
 build debug   $dache::DEBUG_OPTS
 build release $dache::RELEASE_OPTS
 
-task bear {
-    depends_on dache::debug
-    inputs     $dache::debug::inputs
-    outputs    $dache::C_CMDS
+# task bear {
+#     depends_on dache::debug
+#     inputs     $dache::TARGETS
+#     outputs    $dache::C_CMDS
+#     run {
+#         set -ex
+#         bear -- ${dache::debug::run}
+#     }
+# }
+
+command clean {
     run {
-        bear -- $dache::debug::run
+        rm -rf $dache::BUILD_DIR
     }
 }
-
 command clean {
     run {
         rm -rf $dache::BUILD_DIR

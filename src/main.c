@@ -41,15 +41,18 @@ static void config_free(struct dache_config *cfg) {
 
 static void show_help(void) {
   puts("Usage:");
-  puts("  dache [options] -- <command...>       Run command with build caching");
+  puts(
+      "  dache [options] -- <command...>       Run command with build caching");
   puts("  dache cache [options] -- <command...> Same as above (explicit form)");
-  puts("  dache snapshot [options] <files...>   Snapshot files for asset versioning");
+  puts(
+      "  dache snapshot [options] <files...>   Snapshot files for asset versioning");
   puts("  dache restore <manifest.json>         Restore files from snapshot");
   puts("");
   puts("Build cache options:");
   puts("  -i, --input FILE    Add input file/directory (can be repeated)");
   puts("  -o, --output FILE   Add output file/directory (can be repeated)");
-  puts("  -e, --env VAR=VAL   Add environment variable to cache key (can be repeated)");
+  puts(
+      "  -e, --env VAR=VAL   Add environment variable to cache key (can be repeated)");
   puts("");
   puts("Snapshot options:");
   puts("  -o, --output FILE   Output manifest file (default: stdout)");
@@ -64,7 +67,9 @@ static void show_help(void) {
   puts("  dache restore assets.json");
 }
 
-static void print_version(void) { printf("dache %s\n", DACHE_VERSION); }
+static void print_version(void) {
+  printf("dache %s\n", DACHE_VERSION);
+}
 
 static int run_command(const char **argv) {
   pid_t pid = fork();
@@ -101,18 +106,16 @@ static int cmd_snapshot(int argc, char **argv) {
   const char *output_file = NULL;
 
   static struct option long_options[] = {
-      {"output",  required_argument, 0, 'o'},
-      {"help",    no_argument,       0, 'h'},
-      {0,         0,                 0, 0  }
+      {"output", required_argument, 0, 'o'},
+      {"help",   no_argument,       0, 'h'},
+      {0,        0,                 0, 0  }
   };
 
   optind = 1; // Reset getopt
   int opt;
   while ((opt = getopt_long(argc, argv, "+o:h", long_options, NULL)) != -1) {
     switch (opt) {
-    case 'o':
-      output_file = optarg;
-      break;
+    case 'o': output_file = optarg; break;
     case 'h':
       puts("Usage: dache snapshot [-o manifest.json] <files...>");
       puts("");
@@ -120,8 +123,7 @@ static int cmd_snapshot(int argc, char **argv) {
       puts("  -o, --output FILE   Output manifest file (required)");
       puts("  -h, --help          Show this message");
       return EXIT_SUCCESS;
-    default:
-      return EXIT_FAILURE;
+    default: return EXIT_FAILURE;
     }
   }
 
@@ -334,9 +336,8 @@ static int cmd_cache(int argc, char **argv) {
   uint8_t digest[32];
   char cache_key[65];
 
-  int code = dache_cache_key(cfg.envv, cfg.envc,
-                             (const char **)inputs->paths, inputs->count,
-                             cfg.commandv, cfg.commandc, digest);
+  int code = dache_cache_key(cfg.envv, cfg.envc, (const char **)inputs->paths,
+                             inputs->count, cfg.commandv, cfg.commandc, digest);
 
   if (code != 0) {
     fprintf(stderr, "[dache] error: failed to compute cache key (code %d)\n",

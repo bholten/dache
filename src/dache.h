@@ -2,6 +2,7 @@
 #define DACHE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct dache {

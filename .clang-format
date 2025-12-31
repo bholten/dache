@@ -5,7 +5,6 @@ AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLoopsOnASingleLine: false
-AllowShortCaseLabelsOnASingleLine: true
 BreakBeforeBraces: Attach
 BreakStringLiterals: false
 PointerAlignment: Right
