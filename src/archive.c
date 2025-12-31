@@ -9,8 +9,8 @@
 
 #include "dache.h"
 
-static const char *endline = "\n";
-static const size_t endline_len = strlen("\n");
+static const char endline[] = "\n";
+static const size_t endline_len = sizeof(endline) - 1;
 
 bool write_archive(const char **src, const char *dest) {
   struct archive *a;
@@ -37,14 +37,13 @@ bool write_archive(const char **src, const char *dest) {
     archive_entry_set_pathname(entry, *src);
     archive_entry_set_size(entry, st.st_size);
     archive_entry_set_filetype(entry, AE_IFREG);
-    archive_entry_set_perm(entry, 0644);
+    archive_entry_set_perm(entry, st.st_mode & 0777);
     archive_write_header(a, entry);
 
     fd = open(*src, O_RDONLY);
 
     while ((len = read(fd, buff, sizeof(buff))) > 0) {
       archive_write_data(a, buff, len);
-      len = read(fd, buff, sizeof(buff));
     }
 
     close(fd);
@@ -85,17 +84,20 @@ static int copy_data(struct archive *ar, struct archive *aw) {
 }
 
 bool unarchive(const char *src, const char *dest) {
+  (void)dest; // TODO: support extracting to specific directory
+
   struct archive *a;
   struct archive *ext;
   struct archive_entry *entry;
   int r;
-  int flags = ARCHIVE_EXTRACT_TIME;
+  int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM;
 
   a = archive_read_new();
   ext = archive_write_disk_new();
 
   archive_write_disk_set_options(ext, flags);
   archive_read_support_filter_gzip(a);
+  archive_read_support_format_tar(a);
 
   if (src != NULL && strcmp(src, "-") == 0) {
     src = NULL;

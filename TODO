@@ -49,23 +49,23 @@ Integrates trivially with Dagwood:
 ```tcl
 project foo
 
-set INPUTS [lsort -unique [glob src/*.c src/.*h]]
-set OUTPUT build/foo
-set ENV    PATH=/usr/bin/:/usr/local/bin
+let INPUTS [-> [glob src/*.c src/.*h] {List::sort} {List::unique}]
+let OUTPUT build/foo
+let ENV    PATH=/usr/bin/:/usr/local/bin
 
 task build {
-  inputs  $::INPUTS
-  outputs $::OUTPUT
+  inputs  $foo::INPUTS
+  outputs $foo::OUTPUT
   run {
-    gcc $::INPUTS -o $OUTPUT
+    gcc $foo::INPUTS -o $OUTPUT
   }
 }
 
 task dache {
-  inputs  $::foo::build::inputs
-  outputs $::foo::build::outputs
+  inputs  $foo::build::inputs
+  outputs $foo::build::outputs
   run {
-    dache cache --env PATH=$::ENV --inputs $::foo::build::inputs --outputs $::foo::build::outputs -- $::foo::build::run
+    dache cache --env PATH=$foo::ENV --inputs $foo::build::inputs --outputs $foo::build::outputs -- $foo::build::run
   }
 }
 ```
