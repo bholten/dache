@@ -17,11 +17,15 @@
 
 static char *get_default_cache_dir(void) {
   const char *home = getenv("HOME");
-  if (!home) return NULL;
+  if (!home) {
+    return NULL;
+  }
 
   size_t len = strlen(home) + 1 + strlen(DEFAULT_CACHE_DIR) + 1;
   char *path = malloc(len);
-  if (!path) return NULL;
+  if (!path) {
+    return NULL;
+  }
 
   snprintf(path, len, "%s/%s", home, DEFAULT_CACHE_DIR);
   return path;
@@ -29,11 +33,15 @@ static char *get_default_cache_dir(void) {
 
 static char *get_default_hooks_dir(void) {
   const char *home = getenv("HOME");
-  if (!home) return NULL;
+  if (!home) {
+    return NULL;
+  }
 
   size_t len = strlen(home) + 1 + strlen(DEFAULT_HOOKS_DIR) + 1;
   char *path = malloc(len);
-  if (!path) return NULL;
+  if (!path) {
+    return NULL;
+  }
 
   snprintf(path, len, "%s/%s", home, DEFAULT_HOOKS_DIR);
   return path;
@@ -51,7 +59,9 @@ static bool ensure_dir_exists(const char *path) {
 
 dache *dache_new(const char *cache_dir, const char *remote_dir) {
   dache *d = malloc(sizeof(dache));
-  if (!d) return NULL;
+  if (!d) {
+    return NULL;
+  }
 
   if (cache_dir) {
     d->cache_dir = strdup(cache_dir);
@@ -94,17 +104,23 @@ void dache_free(dache *d) {
 static bool copy_file(const char *src, const char *dest);
 
 static char *get_hook_path(dache *d, const char *hook_name) {
-  if (!d->hooks_dir) return NULL;
+  if (!d->hooks_dir) {
+    return NULL;
+  }
   size_t len = strlen(d->hooks_dir) + 1 + strlen(hook_name) + 1;
   char *path = malloc(len);
-  if (!path) return NULL;
+  if (!path) {
+    return NULL;
+  }
   snprintf(path, len, "%s/%s", d->hooks_dir, hook_name);
   return path;
 }
 
 static bool hook_exists(dache *d, const char *hook_name) {
   char *path = get_hook_path(d, hook_name);
-  if (!path) return false;
+  if (!path) {
+    return false;
+  }
   bool exists = access(path, X_OK) == 0;
   free(path);
   return exists;
@@ -113,7 +129,9 @@ static bool hook_exists(dache *d, const char *hook_name) {
 static bool run_hook(dache *d, const char *hook_name, const char *arg1,
                      const char *arg2) {
   char *hook_path = get_hook_path(d, hook_name);
-  if (!hook_path) return false;
+  if (!hook_path) {
+    return false;
+  }
 
   if (access(hook_path, X_OK) != 0) {
     free(hook_path);
@@ -138,11 +156,15 @@ static bool run_hook(dache *d, const char *hook_name, const char *arg1,
 
 static bool remote_file_get(dache *d, const char *remote_path,
                             const char *local_path) {
-  if (!d->remote_dir) return false;
+  if (!d->remote_dir) {
+    return false;
+  }
 
   size_t len = strlen(d->remote_dir) + 1 + strlen(remote_path) + 1;
   char *full_remote = malloc(len);
-  if (!full_remote) return false;
+  if (!full_remote) {
+    return false;
+  }
   snprintf(full_remote, len, "%s/%s", d->remote_dir, remote_path);
 
   if (access(full_remote, F_OK) != 0) {
@@ -157,11 +179,15 @@ static bool remote_file_get(dache *d, const char *remote_path,
 
 static bool remote_file_put(dache *d, const char *local_path,
                             const char *remote_path) {
-  if (!d->remote_dir) return false;
+  if (!d->remote_dir) {
+    return false;
+  }
 
   size_t len = strlen(d->remote_dir) + 1 + strlen(remote_path) + 1;
   char *full_remote = malloc(len);
-  if (!full_remote) return false;
+  if (!full_remote) {
+    return false;
+  }
   snprintf(full_remote, len, "%s/%s", d->remote_dir, remote_path);
 
   char *parent = strdup(full_remote);

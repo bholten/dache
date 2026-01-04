@@ -298,9 +298,7 @@ static int cmd_cache(int argc, char **argv) {
         cfg.envv[cfg.envc++] = optarg;
       }
       break;
-    case 'r':
-      remote_dir = optarg;
-      break;
+    case 'r': remote_dir = optarg; break;
     case 'h':
       show_help();
       config_free(&cfg);
