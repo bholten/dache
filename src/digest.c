@@ -11,7 +11,9 @@
 int digest_from_file(const char *path, uint8_t out[32]) {
   FILE *f = fopen(path, "rb");
 
-  if (!f) return -1;
+  if (!f) {
+    return -1;
+  }
 
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 

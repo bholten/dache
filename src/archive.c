@@ -67,7 +67,9 @@ static int copy_data(struct archive *ar, struct archive *aw) {
   for (;;) {
     r = archive_read_data_block(ar, &buff, &size, &offset);
 
-    if (r == ARCHIVE_EOF) return ARCHIVE_OK;
+    if (r == ARCHIVE_EOF) {
+      return ARCHIVE_OK;
+    }
 
     if (r != ARCHIVE_OK) {
       fprintf(stderr, "%s\n", archive_error_string(ar));
@@ -112,7 +114,9 @@ bool unarchive(const char *src, const char *dest) {
     int needcr = 0;
     r = archive_read_next_header(a, &entry);
 
-    if (r == ARCHIVE_EOF) break;
+    if (r == ARCHIVE_EOF) {
+      break;
+    }
 
     if (r != ARCHIVE_OK) {
       fprintf(stderr, "%s\n", archive_error_string(a));

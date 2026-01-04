@@ -16,11 +16,15 @@
 
 static char *get_default_cache_dir(void) {
   const char *home = getenv("HOME");
-  if (!home) return NULL;
+  if (!home) {
+    return NULL;
+  }
 
   size_t len = strlen(home) + 1 + strlen(DEFAULT_CACHE_DIR) + 1;
   char *path = malloc(len);
-  if (!path) return NULL;
+  if (!path) {
+    return NULL;
+  }
 
   snprintf(path, len, "%s/%s", home, DEFAULT_CACHE_DIR);
   return path;
@@ -38,7 +42,9 @@ static bool ensure_dir_exists(const char *path) {
 
 dache *dache_new(const char *cache_dir) {
   dache *d = malloc(sizeof(dache));
-  if (!d) return NULL;
+  if (!d) {
+    return NULL;
+  }
 
   if (cache_dir) {
     d->cache_dir = strdup(cache_dir);
@@ -181,24 +187,28 @@ static char *cache_path_for_key(dache *d, const char *key) {
   // <cache_dir>/<key>.tar.gz
   size_t len = strlen(d->cache_dir) + 1 + 64 + 7 + 1; // 64 hex + ".tar.gz"
   char *path = malloc(len);
-  if (!path) return NULL;
+  if (!path) {
+    return NULL;
+  }
   snprintf(path, len, "%s/%s.tar.gz", d->cache_dir, key);
   return path;
 }
 
 bool dache_cache_get(dache *d, const char *key) {
-  if (!d || !key) return false;
+  if (!d || !key) {
+    return false;
+  }
 
   char *path = cache_path_for_key(d, key);
-  if (!path) return false;
+  if (!path) {
+    return false;
+  }
 
-  // Check if cache file exists
   if (access(path, F_OK) != 0) {
     free(path);
     return false;
   }
 
-  // Cache hit - extract archive to current directory
   bool ok = unarchive(path, ".");
   free(path);
 
@@ -211,12 +221,15 @@ bool dache_cache_get(dache *d, const char *key) {
 
 bool dache_cache_put(dache *d, const char *key, const char **outputv,
                      int outputc) {
-  if (!d || !key || !outputv || outputc <= 0) return false;
+  if (!d || !key || !outputv || outputc <= 0) {
+    return false;
+  }
 
   char *path = cache_path_for_key(d, key);
-  if (!path) return false;
+  if (!path) {
+    return false;
+  }
 
-  // Build null-terminated array for write_archive
   const char **srcs = malloc((outputc + 1) * sizeof(char *));
   if (!srcs) {
     free(path);
@@ -241,11 +254,11 @@ bool dache_cache_put(dache *d, const char *key, const char **outputv,
   return ok;
 }
 
-// Path expansion implementation
-
 static expanded_paths *expanded_paths_new(void) {
   expanded_paths *ep = malloc(sizeof(expanded_paths));
-  if (!ep) return NULL;
+  if (!ep) {
+    return NULL;
+  }
 
   ep->capacity = 64;
   ep->count = 0;
@@ -261,13 +274,17 @@ static bool expanded_paths_add(expanded_paths *ep, const char *path) {
   if (ep->count >= ep->capacity) {
     int new_cap = ep->capacity * 2;
     char **new_paths = realloc(ep->paths, new_cap * sizeof(char *));
-    if (!new_paths) return false;
+    if (!new_paths) {
+      return false;
+    }
     ep->paths = new_paths;
     ep->capacity = new_cap;
   }
 
   ep->paths[ep->count] = strdup(path);
-  if (!ep->paths[ep->count]) return false;
+  if (!ep->paths[ep->count]) {
+    return false;
+  }
   ep->count++;
   return true;
 }
@@ -292,12 +309,10 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-      // Skip . and ..
       if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
         continue;
       }
 
-      // Build full path
       size_t path_len = strlen(path);
       size_t name_len = strlen(entry->d_name);
       size_t full_len = path_len + 1 + name_len + 1;
@@ -307,7 +322,6 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
         return false;
       }
 
-      // Handle trailing slash
       if (path[path_len - 1] == '/') {
         snprintf(full_path, full_len, "%s%s", path, entry->d_name);
       } else {
@@ -322,7 +336,6 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
     return true;
   }
 
-  // Skip other file types (symlinks, devices, etc.)
   return true;
 }
 
@@ -332,13 +345,14 @@ static int path_compare(const void *a, const void *b) {
 
 expanded_paths *expand_paths(const char **pathv, int pathc) {
   expanded_paths *ep = expanded_paths_new();
-  if (!ep) return NULL;
+  if (!ep) {
+    return NULL;
+  }
 
   for (int i = 0; i < pathc; i++) {
     expand_path_recursive(ep, pathv[i]);
   }
 
-  // Sort for deterministic ordering
   if (ep->count > 1) {
     qsort(ep->paths, ep->count, sizeof(char *), path_compare);
   }
@@ -347,7 +361,9 @@ expanded_paths *expand_paths(const char **pathv, int pathc) {
 }
 
 void expanded_paths_free(expanded_paths *ep) {
-  if (!ep) return;
+  if (!ep) {
+    return;
+  }
   for (int i = 0; i < ep->count; i++) {
     free(ep->paths[i]);
   }
@@ -355,12 +371,12 @@ void expanded_paths_free(expanded_paths *ep) {
   free(ep);
 }
 
-// Blob storage implementation
-
 static char *get_blob_dir(dache *d) {
   size_t len = strlen(d->cache_dir) + strlen("/blobs") + 1;
   char *path = malloc(len);
-  if (!path) return NULL;
+  if (!path) {
+    return NULL;
+  }
   snprintf(path, len, "%s/blobs", d->cache_dir);
   return path;
 }
@@ -368,14 +384,18 @@ static char *get_blob_dir(dache *d) {
 static char *get_blob_path(dache *d, const char *sha256) {
   size_t len = strlen(d->cache_dir) + strlen("/blobs/") + 64 + 1;
   char *path = malloc(len);
-  if (!path) return NULL;
+  if (!path) {
+    return NULL;
+  }
   snprintf(path, len, "%s/blobs/%s", d->cache_dir, sha256);
   return path;
 }
 
 blob_manifest *blob_manifest_new(void) {
   blob_manifest *m = malloc(sizeof(blob_manifest));
-  if (!m) return NULL;
+  if (!m) {
+    return NULL;
+  }
 
   m->capacity = 64;
   m->count = 0;
@@ -388,7 +408,9 @@ blob_manifest *blob_manifest_new(void) {
 }
 
 void blob_manifest_free(blob_manifest *m) {
-  if (!m) return;
+  if (!m) {
+    return;
+  }
   free(m->entries);
   free(m);
 }
@@ -397,19 +419,26 @@ static bool blob_manifest_add(blob_manifest *m, const blob_entry *entry) {
   if (m->count >= m->capacity) {
     int new_cap = m->capacity * 2;
     blob_entry *new_entries = realloc(m->entries, new_cap * sizeof(blob_entry));
-    if (!new_entries) return false;
+    if (!new_entries) {
+      return false;
+    }
     m->entries = new_entries;
     m->capacity = new_cap;
   }
+
   m->entries[m->count++] = *entry;
+
   return true;
 }
 
 static bool copy_file(const char *src, const char *dest) {
   FILE *in = fopen(src, "rb");
-  if (!in) return false;
+  if (!in) {
+    return false;
+  }
 
   FILE *out = fopen(dest, "wb");
+
   if (!out) {
     fclose(in);
     return false;
@@ -417,6 +446,7 @@ static bool copy_file(const char *src, const char *dest) {
 
   char buf[65536];
   size_t n;
+
   while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
     if (fwrite(buf, 1, n, out) != n) {
       fclose(in);
@@ -427,14 +457,17 @@ static bool copy_file(const char *src, const char *dest) {
 
   fclose(in);
   fclose(out);
+
   return true;
 }
 
 bool blob_store(dache *d, const char *path, blob_manifest *m) {
-  if (!d || !path || !m) return false;
+  if (!d || !path || !m) {
+    return false;
+  }
 
-  // Get file info
   struct stat st;
+
   if (stat(path, &st) != 0) {
     fprintf(stderr, "[dache] cannot stat: %s\n", path);
     return false;
@@ -445,8 +478,8 @@ bool blob_store(dache *d, const char *path, blob_manifest *m) {
     return false;
   }
 
-  // Hash the file
   uint8_t digest[32];
+
   if (digest_from_file(path, digest) != 0) {
     fprintf(stderr, "[dache] failed to hash: %s\n", path);
     return false;
@@ -459,51 +492,57 @@ bool blob_store(dache *d, const char *path, blob_manifest *m) {
   entry.size = st.st_size;
   entry.mode = st.st_mode & 0777;
 
-  // Ensure blob directory exists
   char *blob_dir = get_blob_dir(d);
-  if (!blob_dir) return false;
+
+  if (!blob_dir) {
+    return false;
+  }
   ensure_dir_exists(blob_dir);
   free(blob_dir);
 
-  // Check if blob already exists (deduplication)
   char *blob_path = get_blob_path(d, entry.sha256);
-  if (!blob_path) return false;
+
+  if (!blob_path) {
+    return false;
+  }
 
   if (access(blob_path, F_OK) != 0) {
-    // Blob doesn't exist, copy it
     if (!copy_file(path, blob_path)) {
       fprintf(stderr, "[dache] failed to store blob: %s\n", path);
       free(blob_path);
       return false;
     }
   }
+
   free(blob_path);
 
-  // Add to manifest
   return blob_manifest_add(m, &entry);
 }
 
 bool blob_restore(dache *d, const blob_entry *entry) {
-  if (!d || !entry) return false;
+  if (!d || !entry) {
+    return false;
+  }
 
   char *blob_path = get_blob_path(d, entry->sha256);
-  if (!blob_path) return false;
+  if (!blob_path) {
+    return false;
+  }
 
-  // Check blob exists
   if (access(blob_path, F_OK) != 0) {
     fprintf(stderr, "[dache] blob not found: %s\n", entry->sha256);
     free(blob_path);
     return false;
   }
 
-  // Create parent directories if needed
   char *path_copy = strdup(entry->path);
+
   if (path_copy) {
     char *last_slash = strrchr(path_copy, '/');
     if (last_slash) {
       *last_slash = '\0';
-      // Simple mkdir -p equivalent
       char *p = path_copy;
+
       while (*p) {
         if (*p == '/') {
           *p = '\0';
@@ -517,26 +556,27 @@ bool blob_restore(dache *d, const blob_entry *entry) {
     free(path_copy);
   }
 
-  // Copy blob to destination
   if (!copy_file(blob_path, entry->path)) {
     fprintf(stderr, "[dache] failed to restore: %s\n", entry->path);
     free(blob_path);
     return false;
   }
 
-  // Restore permissions
   chmod(entry->path, entry->mode);
 
   free(blob_path);
   return true;
 }
 
-// Simple JSON writing (no external dependency)
 bool blob_manifest_write(const blob_manifest *m, const char *path) {
-  if (!m || !path) return false;
+  if (!m || !path) {
+    return false;
+  }
 
   FILE *f = fopen(path, "w");
-  if (!f) return false;
+  if (!f) {
+    return false;
+  }
 
   fprintf(f, "{\n");
   fprintf(f, "  \"version\": 1,\n");
@@ -560,10 +600,11 @@ bool blob_manifest_write(const blob_manifest *m, const char *path) {
   return true;
 }
 
-// Simple JSON parsing (minimal, handles our specific format)
 static char *json_read_file(const char *path) {
   FILE *f = fopen(path, "r");
-  if (!f) return NULL;
+  if (!f) {
+    return NULL;
+  }
 
   fseek(f, 0, SEEK_END);
   long len = ftell(f);
@@ -582,15 +623,18 @@ static char *json_read_file(const char *path) {
 }
 
 static const char *json_skip_ws(const char *p) {
-  while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+  while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
     p++;
+  }
   return p;
 }
 
 static const char *json_parse_string(const char *p, char *out,
                                      size_t out_size) {
   p = json_skip_ws(p);
-  if (*p != '"') return NULL;
+  if (*p != '"') {
+    return NULL;
+  }
   p++;
 
   size_t i = 0;
@@ -602,7 +646,9 @@ static const char *json_parse_string(const char *p, char *out,
   }
   out[i] = '\0';
 
-  if (*p == '"') p++;
+  if (*p == '"') {
+    p++;
+  }
   return p;
 }
 
@@ -615,9 +661,13 @@ static const char *json_parse_number(const char *p, long *out) {
 
 blob_manifest *blob_manifest_read(const char *path) {
   char *json = json_read_file(path);
-  if (!json) return NULL;
+
+  if (!json) {
+    return NULL;
+  }
 
   blob_manifest *m = blob_manifest_new();
+
   if (!m) {
     free(json);
     return NULL;
@@ -625,8 +675,8 @@ blob_manifest *blob_manifest_read(const char *path) {
 
   const char *p = json;
 
-  // Find "files" array
   p = strstr(p, "\"files\"");
+
   if (!p) {
     free(json);
     blob_manifest_free(m);
@@ -634,6 +684,7 @@ blob_manifest *blob_manifest_read(const char *path) {
   }
 
   p = strchr(p, '[');
+
   if (!p) {
     free(json);
     blob_manifest_free(m);
@@ -641,10 +692,11 @@ blob_manifest *blob_manifest_read(const char *path) {
   }
   p++;
 
-  // Parse each file entry
   while (*p) {
     p = json_skip_ws(p);
-    if (*p == ']') break;
+    if (*p == ']') {
+      break;
+    }
     if (*p == ',') {
       p++;
       continue;
@@ -657,10 +709,11 @@ blob_manifest *blob_manifest_read(const char *path) {
 
     blob_entry entry = {0};
 
-    // Parse fields
     while (*p && *p != '}') {
       p = json_skip_ws(p);
-      if (*p == '}') break;
+      if (*p == '}') {
+        break;
+      }
       if (*p == ',') {
         p++;
         continue;
@@ -672,10 +725,14 @@ blob_manifest *blob_manifest_read(const char *path) {
 
       char key[64];
       p = json_parse_string(p, key, sizeof(key));
-      if (!p) break;
+      if (!p) {
+        break;
+      }
 
       p = json_skip_ws(p);
-      if (*p == ':') p++;
+      if (*p == ':') {
+        p++;
+      }
       p = json_skip_ws(p);
 
       if (strcmp(key, "path") == 0) {
@@ -693,7 +750,9 @@ blob_manifest *blob_manifest_read(const char *path) {
       }
     }
 
-    if (*p == '}') p++;
+    if (*p == '}') {
+      p++;
+    }
 
     if (entry.path[0] && entry.sha256[0]) {
       blob_manifest_add(m, &entry);

@@ -3,9 +3,10 @@ AlignArrayOfStructures: Left
 AllowShortEnumsOnASingleLine: true
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: None
-AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 BreakBeforeBraces: Attach
 BreakStringLiterals: false
+InsertBraces: true
 PointerAlignment: Right
 SpaceBeforeSquareBrackets: false

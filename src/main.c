@@ -80,14 +80,13 @@ static int run_command(const char **argv) {
   }
 
   if (pid == 0) {
-    // Child process
     execvp(argv[0], (char *const *)argv);
     perror("[dache] execvp");
     _exit(127);
   }
 
-  // Parent process - wait for child
   int status;
+
   if (waitpid(pid, &status, 0) < 0) {
     perror("[dache] waitpid");
     return -1;
@@ -100,8 +99,6 @@ static int run_command(const char **argv) {
   return -1;
 }
 
-// --- Snapshot command ---
-
 static int cmd_snapshot(int argc, char **argv) {
   const char *output_file = NULL;
 
@@ -111,8 +108,9 @@ static int cmd_snapshot(int argc, char **argv) {
       {0,        0,                 0, 0  }
   };
 
-  optind = 1; // Reset getopt
+  optind = 1;
   int opt;
+
   while ((opt = getopt_long(argc, argv, "+o:h", long_options, NULL)) != -1) {
     switch (opt) {
     case 'o': output_file = optarg; break;
@@ -137,27 +135,28 @@ static int cmd_snapshot(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  // Initialize dache
   dache *d = dache_new(NULL);
+
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
     return EXIT_FAILURE;
   }
 
-  // Expand input paths
   const char **pathv = (const char **)&argv[optind];
   int pathc = argc - optind;
-
   expanded_paths *files = expand_paths(pathv, pathc);
+
   if (!files || files->count == 0) {
     fprintf(stderr, "[dache] error: no files found to snapshot\n");
-    if (files) expanded_paths_free(files);
+    if (files) {
+      expanded_paths_free(files);
+    }
     dache_free(d);
     return EXIT_FAILURE;
   }
 
-  // Create manifest and store blobs
   blob_manifest *manifest = blob_manifest_new();
+
   if (!manifest) {
     expanded_paths_free(files);
     dache_free(d);
@@ -165,6 +164,7 @@ static int cmd_snapshot(int argc, char **argv) {
   }
 
   int stored = 0;
+
   for (int i = 0; i < files->count; i++) {
     if (blob_store(d, files->paths[i], manifest)) {
       stored++;
@@ -173,7 +173,6 @@ static int cmd_snapshot(int argc, char **argv) {
 
   fprintf(stderr, "[dache] snapshot: %d files stored\n", stored);
 
-  // Write manifest
   if (!blob_manifest_write(manifest, output_file)) {
     fprintf(stderr, "[dache] error: failed to write manifest\n");
     blob_manifest_free(manifest);
@@ -187,10 +186,9 @@ static int cmd_snapshot(int argc, char **argv) {
   blob_manifest_free(manifest);
   expanded_paths_free(files);
   dache_free(d);
+
   return EXIT_SUCCESS;
 }
-
-// --- Restore command ---
 
 static int cmd_restore(int argc, char **argv) {
   if (argc < 2) {
@@ -200,15 +198,15 @@ static int cmd_restore(int argc, char **argv) {
 
   const char *manifest_file = argv[1];
 
-  // Initialize dache
   dache *d = dache_new(NULL);
+
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
     return EXIT_FAILURE;
   }
 
-  // Read manifest
   blob_manifest *manifest = blob_manifest_read(manifest_file);
+
   if (!manifest) {
     fprintf(stderr, "[dache] error: failed to read manifest: %s\n",
             manifest_file);
@@ -216,9 +214,9 @@ static int cmd_restore(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  // Restore each file
   int restored = 0;
   int total = manifest->count;
+
   for (int i = 0; i < manifest->count; i++) {
     if (blob_restore(d, &manifest->entries[i])) {
       restored++;
@@ -231,8 +229,6 @@ static int cmd_restore(int argc, char **argv) {
   dache_free(d);
   return (restored == total) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
-
-// --- Cache command (original behavior) ---
 
 static int cmd_cache(int argc, char **argv) {
   struct dache_config cfg;
@@ -248,6 +244,7 @@ static int cmd_cache(int argc, char **argv) {
   };
 
   optind = 1; // Reset getopt
+
   int opt;
   while ((opt = getopt_long(argc, argv, "+i:o:e:hv", long_options, NULL)) !=
          -1) {
@@ -282,13 +279,11 @@ static int cmd_cache(int argc, char **argv) {
     }
   }
 
-  // Everything after options is the command
   if (optind < argc) {
     cfg.commandv = (const char **)&argv[optind];
     cfg.commandc = argc - optind;
   }
 
-  // Validate we have required arguments
   if (cfg.inputc == 0) {
     fprintf(stderr, "[dache] error: at least one --input is required\n");
     config_free(&cfg);
@@ -307,16 +302,16 @@ static int cmd_cache(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  // Initialize dache with default cache directory
   dache *d = dache_new(NULL);
+
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
     config_free(&cfg);
     return EXIT_FAILURE;
   }
 
-  // Expand input paths (directories become file lists)
   expanded_paths *inputs = expand_paths(cfg.inputv, cfg.inputc);
+
   if (!inputs) {
     fprintf(stderr, "[dache] error: failed to expand input paths\n");
     dache_free(d);
@@ -332,7 +327,6 @@ static int cmd_cache(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  // Compute cache key
   uint8_t digest[32];
   char cache_key[65];
 
@@ -350,16 +344,13 @@ static int cmd_cache(int argc, char **argv) {
 
   digest_to_hex(digest, cache_key);
 
-  // Try cache hit
   if (dache_cache_get(d, cache_key)) {
-    // Cache hit - outputs restored
     expanded_paths_free(inputs);
     dache_free(d);
     config_free(&cfg);
     return EXIT_SUCCESS;
   }
 
-  // Cache miss - run the command
   fprintf(stderr, "[dache] cache miss, running command...\n");
 
   int result = run_command(cfg.commandv);
@@ -372,11 +363,13 @@ static int cmd_cache(int argc, char **argv) {
     return result;
   }
 
-  // Command succeeded - expand and cache the outputs
   expanded_paths *outputs = expand_paths(cfg.outputv, cfg.outputc);
+
   if (!outputs || outputs->count == 0) {
     fprintf(stderr, "[dache] warning: no output files found to cache\n");
-    if (outputs) expanded_paths_free(outputs);
+    if (outputs) {
+      expanded_paths_free(outputs);
+    }
     expanded_paths_free(inputs);
     dache_free(d);
     config_free(&cfg);
@@ -392,15 +385,12 @@ static int cmd_cache(int argc, char **argv) {
   return EXIT_SUCCESS;
 }
 
-// --- Main entry point ---
-
 int main(int argc, char **argv) {
   if (argc < 2) {
     show_help();
     return EXIT_FAILURE;
   }
 
-  // Check for subcommands
   if (strcmp(argv[1], "snapshot") == 0) {
     return cmd_snapshot(argc - 1, argv + 1);
   }
@@ -413,7 +403,6 @@ int main(int argc, char **argv) {
     return cmd_cache(argc - 1, argv + 1);
   }
 
-  // Check for --help or --version before other options
   if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
     show_help();
     return EXIT_SUCCESS;
@@ -424,6 +413,5 @@ int main(int argc, char **argv) {
     return EXIT_SUCCESS;
   }
 
-  // Default: cache mode
   return cmd_cache(argc, argv);
 }
