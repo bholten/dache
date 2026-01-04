@@ -1,23 +1,28 @@
 #ifndef DACHE_H
 #define DACHE_H
 
-#include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
+
+/* C89 compatibility */
+#ifndef __cplusplus
+typedef int bool;
+#define true 1
+#define false 0
+#endif
 
 typedef struct dache {
   char *cache_dir;
-  char *remote_dir;  // Remote cache path (file://) or NULL
-  char *hooks_dir;   // Hooks directory (~/.config/dache/hooks)
+  char *remote_dir;  /* Remote cache path (file://) or NULL */
+  char *hooks_dir;   /* Hooks directory (~/.config/dache/hooks) */
 } dache;
 
-// remote_dir: path for file:// remote cache, or NULL for local-only
+/* remote_dir: path for file:// remote cache, or NULL for local-only */
 dache *dache_new(const char *cache_dir, const char *remote_dir);
 void dache_free(dache *d);
 
 int dache_cache_key(const char **envv, int envc, const char **inputv,
                     int inputc, const char **commandv, int commandc,
-                    uint8_t out_digest[32]);
+                    unsigned char out_digest[32]);
 bool dache_cache_get(dache *d, const char *key);
 bool dache_cache_put(dache *d, const char *key, const char **outputv,
                      int outputc);
@@ -27,8 +32,8 @@ bool unarchive(const char *src, const char *dest);
 bool compress_file(const char *src, const char *dest);
 bool decompress_file(const char *src, const char *dest);
 
-int digest_from_file(const char *path, uint8_t digset_out[32]);
-void digest_to_hex(const uint8_t digest[32], char hex_out[65]);
+int digest_from_file(const char *path, unsigned char digest_out[32]);
+void digest_to_hex(const unsigned char digest[32], char hex_out[65]);
 
 typedef struct {
   char **paths;

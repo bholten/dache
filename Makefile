@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Wstrict-overflow -fno-strict-aliasing
+CFLAGS = -std=c89 -Wall -Wextra -Wpedantic -Wstrict-overflow -fno-strict-aliasing
 LDFLAGS = -larchive -lcrypto -lz
 
 SRCS = src/main.c src/dache.c src/archive.c src/digest.c

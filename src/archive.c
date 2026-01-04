@@ -86,13 +86,16 @@ static int copy_data(struct archive *ar, struct archive *aw) {
 }
 
 bool unarchive(const char *src, const char *dest) {
-  (void)dest; // TODO: support extracting to specific directory
-
   struct archive *a;
   struct archive *ext;
   struct archive_entry *entry;
   int r;
-  int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM;
+  int flags;
+  int needcr;
+
+  (void)dest; /* TODO: support extracting to specific directory */
+
+  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM;
 
   a = archive_read_new();
   ext = archive_write_disk_new();
@@ -105,13 +108,14 @@ bool unarchive(const char *src, const char *dest) {
     src = NULL;
   }
 
-  if ((r = archive_read_open_filename(a, src, 10240))) {
+  r = archive_read_open_filename(a, src, 10240);
+  if (r) {
     fprintf(stderr, "%s\n", archive_error_string(a));
     return false;
   }
 
   for (;;) {
-    int needcr = 0;
+    needcr = 0;
     r = archive_read_next_header(a, &entry);
 
     if (r == ARCHIVE_EOF) {
@@ -150,26 +154,26 @@ bool unarchive(const char *src, const char *dest) {
 }
 
 bool compress_file(const char *src, const char *dest) {
-  FILE *in = fopen(src, "rb");
+  FILE *in;
+  gzFile out;
+  char buffer[65536];
+  size_t bytes_read;
 
+  in = fopen(src, "rb");
   if (!in) {
     perror("fopen src");
     return false;
   }
 
-  gzFile out = gzopen(dest, "wb");
-
+  out = gzopen(dest, "wb");
   if (!out) {
     perror("gzopen dest");
     fclose(in);
     return false;
   }
 
-  char buffer[65536];
-  size_t read;
-
-  while ((read = fread(buffer, 1, sizeof(buffer), in)) > 0) {
-    if (gzwrite(out, buffer, (unsigned int)read) != (int)read) {
+  while ((bytes_read = fread(buffer, 1, sizeof(buffer), in)) > 0) {
+    if (gzwrite(out, buffer, (unsigned int)bytes_read) != (int)bytes_read) {
       perror("gzwrite");
       gzclose(out);
       fclose(in);
@@ -183,26 +187,26 @@ bool compress_file(const char *src, const char *dest) {
 }
 
 bool decompress_file(const char *src, const char *dest) {
-  gzFile in = gzopen(src, "rb");
+  gzFile in;
+  FILE *out;
+  char buffer[65536];
+  int bytes_read;
 
+  in = gzopen(src, "rb");
   if (!in) {
     perror("gzopen src");
     return false;
   }
 
-  FILE *out = fopen(dest, "wb");
-
+  out = fopen(dest, "wb");
   if (!out) {
     perror("fopen src");
     gzclose(in);
     return false;
   }
 
-  char buffer[65536];
-  int read;
-
-  while ((read = gzread(in, buffer, sizeof(buffer))) > 0) {
-    fwrite(buffer, 1, read, out);
+  while ((bytes_read = gzread(in, buffer, sizeof(buffer))) > 0) {
+    fwrite(buffer, 1, bytes_read, out);
   }
 
   gzclose(in);
