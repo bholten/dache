@@ -53,9 +53,11 @@ static void show_help(void) {
   puts("  -o, --output FILE   Add output file/directory (can be repeated)");
   puts(
       "  -e, --env VAR=VAL   Add environment variable to cache key (can be repeated)");
+  puts("  -r, --remote PATH   Remote cache directory (file:// path)");
   puts("");
   puts("Snapshot options:");
   puts("  -o, --output FILE   Output manifest file (default: stdout)");
+  puts("  -r, --remote PATH   Remote blob storage directory (file:// path)");
   puts("");
   puts("General options:");
   puts("  -h, --help          Show this message");
@@ -63,6 +65,7 @@ static void show_help(void) {
   puts("");
   puts("Examples:");
   puts("  dache -i src/ -o build/ -e CC=gcc -- make");
+  puts("  dache -i src/ -o build/ -r /mnt/shared/cache -- make");
   puts("  dache snapshot -o assets.json assets/textures/ assets/models/");
   puts("  dache restore assets.json");
 }
@@ -101,9 +104,11 @@ static int run_command(const char **argv) {
 
 static int cmd_snapshot(int argc, char **argv) {
   const char *output_file = NULL;
+  const char *remote_dir = NULL;
 
   static struct option long_options[] = {
       {"output", required_argument, 0, 'o'},
+      {"remote", required_argument, 0, 'r'},
       {"help",   no_argument,       0, 'h'},
       {0,        0,                 0, 0  }
   };
@@ -111,14 +116,16 @@ static int cmd_snapshot(int argc, char **argv) {
   optind = 1;
   int opt;
 
-  while ((opt = getopt_long(argc, argv, "+o:h", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "+o:r:h", long_options, NULL)) != -1) {
     switch (opt) {
     case 'o': output_file = optarg; break;
+    case 'r': remote_dir = optarg; break;
     case 'h':
-      puts("Usage: dache snapshot [-o manifest.json] <files...>");
+      puts("Usage: dache snapshot [-o manifest.json] [-r remote] <files...>");
       puts("");
       puts("Options:");
       puts("  -o, --output FILE   Output manifest file (required)");
+      puts("  -r, --remote PATH   Remote blob storage directory");
       puts("  -h, --help          Show this message");
       return EXIT_SUCCESS;
     default: return EXIT_FAILURE;
@@ -135,7 +142,7 @@ static int cmd_snapshot(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  dache *d = dache_new(NULL);
+  dache *d = dache_new(NULL, remote_dir);
 
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
@@ -191,14 +198,39 @@ static int cmd_snapshot(int argc, char **argv) {
 }
 
 static int cmd_restore(int argc, char **argv) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: dache restore <manifest.json>\n");
+  const char *remote_dir = NULL;
+
+  static struct option long_options[] = {
+      {"remote", required_argument, 0, 'r'},
+      {"help",   no_argument,       0, 'h'},
+      {0,        0,                 0, 0  }
+  };
+
+  optind = 1;
+  int opt;
+
+  while ((opt = getopt_long(argc, argv, "+r:h", long_options, NULL)) != -1) {
+    switch (opt) {
+    case 'r': remote_dir = optarg; break;
+    case 'h':
+      puts("Usage: dache restore [-r remote] <manifest.json>");
+      puts("");
+      puts("Options:");
+      puts("  -r, --remote PATH   Remote blob storage directory");
+      puts("  -h, --help          Show this message");
+      return EXIT_SUCCESS;
+    default: return EXIT_FAILURE;
+    }
+  }
+
+  if (optind >= argc) {
+    fprintf(stderr, "Usage: dache restore [-r remote] <manifest.json>\n");
     return EXIT_FAILURE;
   }
 
-  const char *manifest_file = argv[1];
+  const char *manifest_file = argv[optind];
 
-  dache *d = dache_new(NULL);
+  dache *d = dache_new(NULL, remote_dir);
 
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
@@ -233,11 +265,13 @@ static int cmd_restore(int argc, char **argv) {
 static int cmd_cache(int argc, char **argv) {
   struct dache_config cfg;
   config_init(&cfg);
+  const char *remote_dir = NULL;
 
   static struct option long_options[] = {
       {"input",   required_argument, 0, 'i'},
       {"output",  required_argument, 0, 'o'},
       {"env",     required_argument, 0, 'e'},
+      {"remote",  required_argument, 0, 'r'},
       {"help",    no_argument,       0, 'h'},
       {"version", no_argument,       0, 'v'},
       {0,         0,                 0, 0  }
@@ -246,7 +280,7 @@ static int cmd_cache(int argc, char **argv) {
   optind = 1; // Reset getopt
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "+i:o:e:hv", long_options, NULL)) !=
+  while ((opt = getopt_long(argc, argv, "+i:o:e:r:hv", long_options, NULL)) !=
          -1) {
     switch (opt) {
     case 'i':
@@ -263,6 +297,9 @@ static int cmd_cache(int argc, char **argv) {
       if (cfg.envc < MAX_ARGS) {
         cfg.envv[cfg.envc++] = optarg;
       }
+      break;
+    case 'r':
+      remote_dir = optarg;
       break;
     case 'h':
       show_help();
@@ -302,7 +339,7 @@ static int cmd_cache(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  dache *d = dache_new(NULL);
+  dache *d = dache_new(NULL, remote_dir);
 
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");

@@ -13,20 +13,29 @@
 #include "dache.h"
 
 #define DEFAULT_CACHE_DIR ".cache/dache"
+#define DEFAULT_HOOKS_DIR ".config/dache/hooks"
 
 static char *get_default_cache_dir(void) {
   const char *home = getenv("HOME");
-  if (!home) {
-    return NULL;
-  }
+  if (!home) return NULL;
 
   size_t len = strlen(home) + 1 + strlen(DEFAULT_CACHE_DIR) + 1;
   char *path = malloc(len);
-  if (!path) {
-    return NULL;
-  }
+  if (!path) return NULL;
 
   snprintf(path, len, "%s/%s", home, DEFAULT_CACHE_DIR);
+  return path;
+}
+
+static char *get_default_hooks_dir(void) {
+  const char *home = getenv("HOME");
+  if (!home) return NULL;
+
+  size_t len = strlen(home) + 1 + strlen(DEFAULT_HOOKS_DIR) + 1;
+  char *path = malloc(len);
+  if (!path) return NULL;
+
+  snprintf(path, len, "%s/%s", home, DEFAULT_HOOKS_DIR);
   return path;
 }
 
@@ -40,11 +49,9 @@ static bool ensure_dir_exists(const char *path) {
   return mkdir(path, 0755) == 0;
 }
 
-dache *dache_new(const char *cache_dir) {
+dache *dache_new(const char *cache_dir, const char *remote_dir) {
   dache *d = malloc(sizeof(dache));
-  if (!d) {
-    return NULL;
-  }
+  if (!d) return NULL;
 
   if (cache_dir) {
     d->cache_dir = strdup(cache_dir);
@@ -57,11 +64,13 @@ dache *dache_new(const char *cache_dir) {
     return NULL;
   }
 
-  // Ensure cache directory exists
+  d->remote_dir = remote_dir ? strdup(remote_dir) : NULL;
+  d->hooks_dir = get_default_hooks_dir();
+
   if (!ensure_dir_exists(d->cache_dir)) {
-    // Try creating parent first (e.g., ~/.cache)
     char *parent = strdup(d->cache_dir);
     char *last_slash = strrchr(parent, '/');
+
     if (last_slash) {
       *last_slash = '\0';
       ensure_dir_exists(parent);
@@ -76,8 +85,105 @@ dache *dache_new(const char *cache_dir) {
 void dache_free(dache *d) {
   if (d) {
     free(d->cache_dir);
+    free(d->remote_dir);
+    free(d->hooks_dir);
     free(d);
   }
+}
+
+static bool copy_file(const char *src, const char *dest);
+
+static char *get_hook_path(dache *d, const char *hook_name) {
+  if (!d->hooks_dir) return NULL;
+  size_t len = strlen(d->hooks_dir) + 1 + strlen(hook_name) + 1;
+  char *path = malloc(len);
+  if (!path) return NULL;
+  snprintf(path, len, "%s/%s", d->hooks_dir, hook_name);
+  return path;
+}
+
+static bool hook_exists(dache *d, const char *hook_name) {
+  char *path = get_hook_path(d, hook_name);
+  if (!path) return false;
+  bool exists = access(path, X_OK) == 0;
+  free(path);
+  return exists;
+}
+
+static bool run_hook(dache *d, const char *hook_name, const char *arg1,
+                     const char *arg2) {
+  char *hook_path = get_hook_path(d, hook_name);
+  if (!hook_path) return false;
+
+  if (access(hook_path, X_OK) != 0) {
+    free(hook_path);
+    return false;
+  }
+
+  // Build command: hook_path arg1 arg2
+  size_t cmd_len = strlen(hook_path) + 1 + strlen(arg1) + 1 + strlen(arg2) + 1;
+  char *cmd = malloc(cmd_len + 32); // extra space for quotes
+  if (!cmd) {
+    free(hook_path);
+    return false;
+  }
+
+  snprintf(cmd, cmd_len + 32, "%s '%s' '%s'", hook_path, arg1, arg2);
+  int ret = system(cmd);
+
+  free(cmd);
+  free(hook_path);
+  return ret == 0;
+}
+
+static bool remote_file_get(dache *d, const char *remote_path,
+                            const char *local_path) {
+  if (!d->remote_dir) return false;
+
+  size_t len = strlen(d->remote_dir) + 1 + strlen(remote_path) + 1;
+  char *full_remote = malloc(len);
+  if (!full_remote) return false;
+  snprintf(full_remote, len, "%s/%s", d->remote_dir, remote_path);
+
+  if (access(full_remote, F_OK) != 0) {
+    free(full_remote);
+    return false;
+  }
+
+  bool ok = copy_file(full_remote, local_path);
+  free(full_remote);
+  return ok;
+}
+
+static bool remote_file_put(dache *d, const char *local_path,
+                            const char *remote_path) {
+  if (!d->remote_dir) return false;
+
+  size_t len = strlen(d->remote_dir) + 1 + strlen(remote_path) + 1;
+  char *full_remote = malloc(len);
+  if (!full_remote) return false;
+  snprintf(full_remote, len, "%s/%s", d->remote_dir, remote_path);
+
+  char *parent = strdup(full_remote);
+  char *last_slash = strrchr(parent, '/');
+  if (last_slash) {
+    *last_slash = '\0';
+    char *p = parent;
+    while (*p) {
+      if (*p == '/' && p != parent) {
+        *p = '\0';
+        mkdir(parent, 0755);
+        *p = '/';
+      }
+      p++;
+    }
+    mkdir(parent, 0755);
+  }
+  free(parent);
+
+  bool ok = copy_file(local_path, full_remote);
+  free(full_remote);
+  return ok;
 }
 
 static int digest(EVP_MD_CTX *ctx, const char *path) {
@@ -204,19 +310,42 @@ bool dache_cache_get(dache *d, const char *key) {
     return false;
   }
 
-  if (access(path, F_OK) != 0) {
+  if (access(path, F_OK) == 0) {
+    bool ok = unarchive(path, ".");
     free(path);
-    return false;
+    if (ok) {
+      fprintf(stderr, "[dache] cache hit (local): %s\n", key);
+    }
+    return ok;
   }
 
-  bool ok = unarchive(path, ".");
+  if (hook_exists(d, "remote-get")) {
+    if (run_hook(d, "remote-get", key, path)) {
+      if (access(path, F_OK) == 0) {
+        bool ok = unarchive(path, ".");
+        free(path);
+        if (ok) {
+          fprintf(stderr, "[dache] cache hit (hook): %s\n", key);
+        }
+        return ok;
+      }
+    }
+  }
+
+  char remote_key[128];
+  snprintf(remote_key, sizeof(remote_key), "%s.tar.gz", key);
+
+  if (remote_file_get(d, remote_key, path)) {
+    bool ok = unarchive(path, ".");
+    free(path);
+    if (ok) {
+      fprintf(stderr, "[dache] cache hit (remote): %s\n", key);
+    }
+    return ok;
+  }
+
   free(path);
-
-  if (ok) {
-    fprintf(stderr, "[dache] cache hit: %s\n", key);
-  }
-
-  return ok;
+  return false;
 }
 
 bool dache_cache_put(dache *d, const char *key, const char **outputv,
@@ -244,14 +373,28 @@ bool dache_cache_put(dache *d, const char *key, const char **outputv,
   bool ok = write_archive(srcs, path);
   free(srcs);
 
-  if (ok) {
-    fprintf(stderr, "[dache] cached: %s\n", key);
-  } else {
+  if (!ok) {
     fprintf(stderr, "[dache] failed to cache: %s\n", key);
+    free(path);
+    return false;
+  }
+
+  fprintf(stderr, "[dache] cached (local): %s\n", key);
+
+  if (hook_exists(d, "remote-put")) {
+    if (run_hook(d, "remote-put", key, path)) {
+      fprintf(stderr, "[dache] pushed to remote (hook)\n");
+    }
+  } else if (d->remote_dir) {
+    char remote_key[128];
+    snprintf(remote_key, sizeof(remote_key), "%s.tar.gz", key);
+    if (remote_file_put(d, path, remote_key)) {
+      fprintf(stderr, "[dache] pushed to remote (file://)\n");
+    }
   }
 
   free(path);
-  return ok;
+  return true;
 }
 
 static expanded_paths *expanded_paths_new(void) {
@@ -514,6 +657,14 @@ bool blob_store(dache *d, const char *path, blob_manifest *m) {
     }
   }
 
+  if (hook_exists(d, "remote-put-blob")) {
+    run_hook(d, "remote-put-blob", entry.sha256, blob_path);
+  } else if (d->remote_dir) {
+    char remote_blob[128];
+    snprintf(remote_blob, sizeof(remote_blob), "blobs/%s", entry.sha256);
+    remote_file_put(d, blob_path, remote_blob);
+  }
+
   free(blob_path);
 
   return blob_manifest_add(m, &entry);
@@ -530,9 +681,29 @@ bool blob_restore(dache *d, const blob_entry *entry) {
   }
 
   if (access(blob_path, F_OK) != 0) {
-    fprintf(stderr, "[dache] blob not found: %s\n", entry->sha256);
-    free(blob_path);
-    return false;
+    bool fetched = false;
+
+    if (hook_exists(d, "remote-get-blob")) {
+      if (run_hook(d, "remote-get-blob", entry->sha256, blob_path)) {
+        if (access(blob_path, F_OK) == 0) {
+          fetched = true;
+        }
+      }
+    }
+
+    if (!fetched && d->remote_dir) {
+      char remote_blob[128];
+      snprintf(remote_blob, sizeof(remote_blob), "blobs/%s", entry->sha256);
+      if (remote_file_get(d, remote_blob, blob_path)) {
+        fetched = true;
+      }
+    }
+
+    if (!fetched) {
+      fprintf(stderr, "[dache] blob not found: %s\n", entry->sha256);
+      free(blob_path);
+      return false;
+    }
   }
 
   char *path_copy = strdup(entry->path);
