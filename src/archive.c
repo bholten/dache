@@ -9,9 +9,6 @@
 
 #include "dache.h"
 
-static const char endline[] = "\n";
-static const size_t endline_len = sizeof(endline) - 1;
-
 bool write_archive(const char **src, const char *dest) {
   struct archive *a;
   struct archive_entry *entry;
@@ -91,11 +88,13 @@ bool unarchive(const char *src, const char *dest) {
   struct archive_entry *entry;
   int r;
   int flags;
-  int needcr;
 
-  (void)dest; /* TODO: support extracting to specific directory */
+  /* TODO: support extracting to specific directory */
+  (void)dest;
 
-  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM;
+  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |
+          ARCHIVE_EXTRACT_SECURE_NODOTDOT | ARCHIVE_EXTRACT_SECURE_SYMLINKS |
+          ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
 
   a = archive_read_new();
   ext = archive_write_disk_new();
@@ -109,13 +108,13 @@ bool unarchive(const char *src, const char *dest) {
   }
 
   r = archive_read_open_filename(a, src, 10240);
+
   if (r) {
     fprintf(stderr, "%s\n", archive_error_string(a));
     return false;
   }
 
   for (;;) {
-    needcr = 0;
     r = archive_read_next_header(a, &entry);
 
     if (r == ARCHIVE_EOF) {
@@ -130,18 +129,22 @@ bool unarchive(const char *src, const char *dest) {
     r = archive_write_header(ext, entry);
 
     if (r != ARCHIVE_OK) {
-      fprintf(stderr, "%s\n", archive_error_string(a));
-      needcr = 1;
-    } else {
-      r = copy_data(a, ext);
-
-      if (r != ARCHIVE_OK) {
-        needcr = 1;
-      }
+      fprintf(stderr, "%s\n", archive_error_string(ext));
+      archive_read_close(a);
+      archive_read_free(a);
+      archive_write_close(ext);
+      archive_write_free(ext);
+      return false;
     }
 
-    if (needcr) {
-      write(1, endline, endline_len);
+    r = copy_data(a, ext);
+
+    if (r != ARCHIVE_OK) {
+      archive_read_close(a);
+      archive_read_free(a);
+      archive_write_close(ext);
+      archive_write_free(ext);
+      return false;
     }
   }
 
@@ -160,12 +163,14 @@ bool compress_file(const char *src, const char *dest) {
   size_t bytes_read;
 
   in = fopen(src, "rb");
+
   if (!in) {
     perror("fopen src");
     return false;
   }
 
   out = gzopen(dest, "wb");
+
   if (!out) {
     perror("gzopen dest");
     fclose(in);
@@ -193,12 +198,14 @@ bool decompress_file(const char *src, const char *dest) {
   int bytes_read;
 
   in = gzopen(src, "rb");
+
   if (!in) {
     perror("gzopen src");
     return false;
   }
 
   out = fopen(dest, "wb");
+
   if (!out) {
     perror("fopen src");
     gzclose(in);

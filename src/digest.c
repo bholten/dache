@@ -16,17 +16,20 @@ int digest_from_file(const char *path, unsigned char out[32]) {
   unsigned int len;
 
   f = fopen(path, "rb");
+
   if (!f) {
     return -1;
   }
 
   ctx = EVP_MD_CTX_new();
+
   if (!ctx) {
     fclose(f);
     return -2;
   }
 
   md = EVP_sha256();
+
   if (!EVP_DigestInit_ex(ctx, md, NULL)) {
     EVP_MD_CTX_free(ctx);
     fclose(f);
@@ -42,6 +45,7 @@ int digest_from_file(const char *path, unsigned char out[32]) {
   }
 
   len = 0;
+
   if (!EVP_DigestFinal_ex(ctx, out, &len)) {
     EVP_MD_CTX_free(ctx);
     fclose(f);
@@ -59,5 +63,6 @@ void digest_to_hex(const unsigned char digest[32], char hex_out[65]) {
   for (i = 0; i < 32; ++i) {
     sprintf(&hex_out[i * 2], "%02x", digest[i]);
   }
+
   hex_out[64] = '\0';
 }

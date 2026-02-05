@@ -12,14 +12,12 @@ typedef int bool;
 
 typedef struct dache {
   char *cache_dir;
-  char *remote_dir;  /* Remote cache path (file://) or NULL */
-  char *hooks_dir;   /* Hooks directory (~/.config/dache/hooks) */
+  char *remote_dir;
+  char *hooks_dir;
 } dache;
 
-/* remote_dir: path for file:// remote cache, or NULL for local-only */
 dache *dache_new(const char *cache_dir, const char *remote_dir);
 void dache_free(dache *d);
-
 int dache_cache_key(const char **envv, int envc, const char **inputv,
                     int inputc, const char **commandv, int commandc,
                     unsigned char out_digest[32]);

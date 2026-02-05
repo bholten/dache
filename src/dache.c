@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <openssl/evp.h>
@@ -26,6 +27,7 @@ static char *get_default_cache_dir(void) {
 
   len = strlen(home) + 1 + strlen(DEFAULT_CACHE_DIR) + 1;
   path = malloc(len);
+
   if (!path) {
     return NULL;
   }
@@ -56,9 +58,11 @@ static char *get_default_hooks_dir(void) {
 
 static bool ensure_dir_exists(const char *path) {
   struct stat st;
+
   if (stat(path, &st) == 0) {
     return S_ISDIR(st.st_mode);
   }
+
   /* Create directory (and parent if needed) */
   /* Simple approach: just try mkdir, assume parent exists */
   return mkdir(path, 0755) == 0;
@@ -70,6 +74,7 @@ dache *dache_new(const char *cache_dir, const char *remote_dir) {
   char *last_slash;
 
   d = malloc(sizeof(dache));
+
   if (!d) {
     return NULL;
   }
@@ -121,12 +126,16 @@ static char *get_hook_path(dache *d, const char *hook_name) {
   if (!d->hooks_dir) {
     return NULL;
   }
+
   len = strlen(d->hooks_dir) + 1 + strlen(hook_name) + 1;
   path = malloc(len);
+
   if (!path) {
     return NULL;
   }
+
   snprintf(path, len, "%s/%s", d->hooks_dir, hook_name);
+
   return path;
 }
 
@@ -135,22 +144,26 @@ static bool hook_exists(dache *d, const char *hook_name) {
   bool exists;
 
   path = get_hook_path(d, hook_name);
+
   if (!path) {
     return false;
   }
+
   exists = access(path, X_OK) == 0;
   free(path);
+
   return exists;
 }
 
 static bool run_hook(dache *d, const char *hook_name, const char *arg1,
                      const char *arg2) {
   char *hook_path;
-  size_t cmd_len;
-  char *cmd;
-  int ret;
+  char *argv[4];
+  pid_t pid;
+  int status;
 
   hook_path = get_hook_path(d, hook_name);
+
   if (!hook_path) {
     return false;
   }
@@ -160,20 +173,29 @@ static bool run_hook(dache *d, const char *hook_name, const char *arg1,
     return false;
   }
 
-  /* Build command: hook_path arg1 arg2 */
-  cmd_len = strlen(hook_path) + 1 + strlen(arg1) + 1 + strlen(arg2) + 1;
-  cmd = malloc(cmd_len + 32); /* extra space for quotes */
-  if (!cmd) {
+  pid = fork();
+
+  if (pid < 0) {
     free(hook_path);
     return false;
   }
 
-  snprintf(cmd, cmd_len + 32, "%s '%s' '%s'", hook_path, arg1, arg2);
-  ret = system(cmd);
+  if (pid == 0) {
+    argv[0] = hook_path;
+    argv[1] = (char *)arg1;
+    argv[2] = (char *)arg2;
+    argv[3] = NULL;
+    execvp(argv[0], argv);
+    _exit(127);
+  }
 
-  free(cmd);
   free(hook_path);
-  return ret == 0;
+
+  if (waitpid(pid, &status, 0) < 0) {
+    return false;
+  }
+
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 static bool remote_file_get(dache *d, const char *remote_path,
@@ -188,9 +210,11 @@ static bool remote_file_get(dache *d, const char *remote_path,
 
   len = strlen(d->remote_dir) + 1 + strlen(remote_path) + 1;
   full_remote = malloc(len);
+
   if (!full_remote) {
     return false;
   }
+
   snprintf(full_remote, len, "%s/%s", d->remote_dir, remote_path);
 
   if (access(full_remote, F_OK) != 0) {
@@ -200,6 +224,7 @@ static bool remote_file_get(dache *d, const char *remote_path,
 
   ok = copy_file(full_remote, local_path);
   free(full_remote);
+
   return ok;
 }
 
@@ -218,30 +243,37 @@ static bool remote_file_put(dache *d, const char *local_path,
 
   len = strlen(d->remote_dir) + 1 + strlen(remote_path) + 1;
   full_remote = malloc(len);
+
   if (!full_remote) {
     return false;
   }
-  snprintf(full_remote, len, "%s/%s", d->remote_dir, remote_path);
 
+  snprintf(full_remote, len, "%s/%s", d->remote_dir, remote_path);
   parent = strdup(full_remote);
   last_slash = strrchr(parent, '/');
+
   if (last_slash) {
     *last_slash = '\0';
     p = parent;
+
     while (*p) {
       if (*p == '/' && p != parent) {
         *p = '\0';
         mkdir(parent, 0755);
         *p = '/';
       }
+
       p++;
     }
+
     mkdir(parent, 0755);
   }
+
   free(parent);
 
   ok = copy_file(local_path, full_remote);
   free(full_remote);
+
   return ok;
 }
 
@@ -251,6 +283,7 @@ static int digest(EVP_MD_CTX *ctx, const char *path) {
   size_t n;
 
   f = fopen(path, "rb");
+
   if (!f) {
     fprintf(stderr, "[dache] could not open file: %s\n", path);
     return -1;
@@ -264,6 +297,7 @@ static int digest(EVP_MD_CTX *ctx, const char *path) {
   }
 
   fclose(f);
+
   return 0;
 }
 
@@ -276,11 +310,13 @@ int dache_cache_key(const char **envv, int envc, const char **inputv,
   unsigned int len;
 
   ctx = EVP_MD_CTX_new();
+
   if (!ctx) {
     return -1;
   }
 
   md = EVP_sha256();
+
   if (!EVP_DigestInit_ex(ctx, md, NULL)) {
     EVP_MD_CTX_free(ctx);
     return -2;
@@ -310,6 +346,7 @@ int dache_cache_key(const char **envv, int envc, const char **inputv,
 
   for (j = 0; j < inputc; j++) {
     code = digest(ctx, inputv[j]);
+
     if (code != 0) {
       fprintf(stderr, "[dache] failed to hash input: %s\n", inputv[j]);
       EVP_MD_CTX_free(ctx);
@@ -340,12 +377,14 @@ int dache_cache_key(const char **envv, int envc, const char **inputv,
   }
 
   len = 0;
+
   if (!EVP_DigestFinal_ex(ctx, out_digest, &len)) {
     EVP_MD_CTX_free(ctx);
     return -12;
   }
 
   EVP_MD_CTX_free(ctx);
+
   return 0;
 }
 
@@ -354,11 +393,14 @@ static char *cache_path_for_key(dache *d, const char *key) {
   size_t len;
   char *path;
 
-  len = strlen(d->cache_dir) + 1 + 64 + 7 + 1; /* 64 hex + ".tar.gz" */
+  /* 64 hex + ".tar.gz" */
+  len = strlen(d->cache_dir) + 1 + 64 + 7 + 1;
   path = malloc(len);
+
   if (!path) {
     return NULL;
   }
+
   snprintf(path, len, "%s/%s.tar.gz", d->cache_dir, key);
   return path;
 }
@@ -373,6 +415,7 @@ bool dache_cache_get(dache *d, const char *key) {
   }
 
   path = cache_path_for_key(d, key);
+
   if (!path) {
     return false;
   }
@@ -380,9 +423,11 @@ bool dache_cache_get(dache *d, const char *key) {
   if (access(path, F_OK) == 0) {
     ok = unarchive(path, ".");
     free(path);
+
     if (ok) {
       fprintf(stderr, "[dache] cache hit (local): %s\n", key);
     }
+
     return ok;
   }
 
@@ -391,9 +436,11 @@ bool dache_cache_get(dache *d, const char *key) {
       if (access(path, F_OK) == 0) {
         ok = unarchive(path, ".");
         free(path);
+
         if (ok) {
           fprintf(stderr, "[dache] cache hit (hook): %s\n", key);
         }
+
         return ok;
       }
     }
@@ -404,13 +451,16 @@ bool dache_cache_get(dache *d, const char *key) {
   if (remote_file_get(d, remote_key, path)) {
     ok = unarchive(path, ".");
     free(path);
+
     if (ok) {
       fprintf(stderr, "[dache] cache hit (remote): %s\n", key);
     }
+
     return ok;
   }
 
   free(path);
+
   return false;
 }
 
@@ -427,11 +477,13 @@ bool dache_cache_put(dache *d, const char *key, const char **outputv,
   }
 
   path = cache_path_for_key(d, key);
+
   if (!path) {
     return false;
   }
 
   srcs = malloc((outputc + 1) * sizeof(char *));
+
   if (!srcs) {
     free(path);
     return false;
@@ -440,8 +492,8 @@ bool dache_cache_put(dache *d, const char *key, const char **outputv,
   for (i = 0; i < outputc; i++) {
     srcs[i] = outputv[i];
   }
-  srcs[outputc] = NULL;
 
+  srcs[outputc] = NULL;
   ok = write_archive(srcs, path);
   free(srcs);
 
@@ -459,12 +511,14 @@ bool dache_cache_put(dache *d, const char *key, const char **outputv,
     }
   } else if (d->remote_dir) {
     snprintf(remote_key, sizeof(remote_key), "%s.tar.gz", key);
+
     if (remote_file_put(d, path, remote_key)) {
       fprintf(stderr, "[dache] pushed to remote (file://)\n");
     }
   }
 
   free(path);
+
   return true;
 }
 
@@ -472,6 +526,7 @@ static expanded_paths *expanded_paths_new(void) {
   expanded_paths *ep;
 
   ep = malloc(sizeof(expanded_paths));
+
   if (!ep) {
     return NULL;
   }
@@ -479,10 +534,12 @@ static expanded_paths *expanded_paths_new(void) {
   ep->capacity = 64;
   ep->count = 0;
   ep->paths = malloc(ep->capacity * sizeof(char *));
+
   if (!ep->paths) {
     free(ep);
     return NULL;
   }
+
   return ep;
 }
 
@@ -493,18 +550,23 @@ static bool expanded_paths_add(expanded_paths *ep, const char *path) {
   if (ep->count >= ep->capacity) {
     new_cap = ep->capacity * 2;
     new_paths = realloc(ep->paths, new_cap * sizeof(char *));
+
     if (!new_paths) {
       return false;
     }
+
     ep->paths = new_paths;
     ep->capacity = new_cap;
   }
 
   ep->paths[ep->count] = strdup(path);
+
   if (!ep->paths[ep->count]) {
     return false;
   }
+
   ep->count++;
+
   return true;
 }
 
@@ -540,6 +602,7 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
       name_len = strlen(entry->d_name);
       full_len = path_len + 1 + name_len + 1;
       full_path = malloc(full_len);
+
       if (!full_path) {
         closedir(dir);
         return false;
@@ -556,6 +619,7 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
     }
 
     closedir(dir);
+
     return true;
   }
 
@@ -571,6 +635,7 @@ expanded_paths *expand_paths(const char **pathv, int pathc) {
   int i;
 
   ep = expanded_paths_new();
+
   if (!ep) {
     return NULL;
   }
@@ -592,9 +657,11 @@ void expanded_paths_free(expanded_paths *ep) {
   if (!ep) {
     return;
   }
+
   for (i = 0; i < ep->count; i++) {
     free(ep->paths[i]);
   }
+
   free(ep->paths);
   free(ep);
 }
@@ -605,10 +672,13 @@ static char *get_blob_dir(dache *d) {
 
   len = strlen(d->cache_dir) + strlen("/blobs") + 1;
   path = malloc(len);
+
   if (!path) {
     return NULL;
   }
+
   snprintf(path, len, "%s/blobs", d->cache_dir);
+
   return path;
 }
 
@@ -618,10 +688,13 @@ static char *get_blob_path(dache *d, const char *sha256) {
 
   len = strlen(d->cache_dir) + strlen("/blobs/") + 64 + 1;
   path = malloc(len);
+
   if (!path) {
     return NULL;
   }
+
   snprintf(path, len, "%s/blobs/%s", d->cache_dir, sha256);
+
   return path;
 }
 
@@ -629,6 +702,7 @@ blob_manifest *blob_manifest_new(void) {
   blob_manifest *m;
 
   m = malloc(sizeof(blob_manifest));
+
   if (!m) {
     return NULL;
   }
@@ -636,10 +710,12 @@ blob_manifest *blob_manifest_new(void) {
   m->capacity = 64;
   m->count = 0;
   m->entries = malloc(m->capacity * sizeof(blob_entry));
+
   if (!m->entries) {
     free(m);
     return NULL;
   }
+
   return m;
 }
 
@@ -647,6 +723,7 @@ void blob_manifest_free(blob_manifest *m) {
   if (!m) {
     return;
   }
+
   free(m->entries);
   free(m);
 }
@@ -658,9 +735,11 @@ static bool blob_manifest_add(blob_manifest *m, const blob_entry *entry) {
   if (m->count >= m->capacity) {
     new_cap = m->capacity * 2;
     new_entries = realloc(m->entries, new_cap * sizeof(blob_entry));
+
     if (!new_entries) {
       return false;
     }
+
     m->entries = new_entries;
     m->capacity = new_cap;
   }
@@ -674,14 +753,19 @@ static bool copy_file(const char *src, const char *dest) {
   FILE *in;
   FILE *out;
   char buf[65536];
+  char tmp_path[1024];
   size_t n;
 
+  snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld", dest, (long)getpid());
+
   in = fopen(src, "rb");
+
   if (!in) {
     return false;
   }
 
-  out = fopen(dest, "wb");
+  out = fopen(tmp_path, "wb");
+
   if (!out) {
     fclose(in);
     return false;
@@ -691,12 +775,18 @@ static bool copy_file(const char *src, const char *dest) {
     if (fwrite(buf, 1, n, out) != n) {
       fclose(in);
       fclose(out);
+      unlink(tmp_path);
       return false;
     }
   }
 
   fclose(in);
   fclose(out);
+
+  if (rename(tmp_path, dest) != 0) {
+    unlink(tmp_path);
+    return false;
+  }
 
   return true;
 }
@@ -734,15 +824,17 @@ bool blob_store(dache *d, const char *path, blob_manifest *m) {
   digest_to_hex(digest_buf, entry.sha256);
   entry.size = st.st_size;
   entry.mode = st.st_mode & 0777;
-
   blob_dir = get_blob_dir(d);
+
   if (!blob_dir) {
     return false;
   }
+
   ensure_dir_exists(blob_dir);
   free(blob_dir);
 
   blob_path = get_blob_path(d, entry.sha256);
+
   if (!blob_path) {
     return false;
   }
@@ -771,6 +863,8 @@ bool blob_restore(dache *d, const blob_entry *entry) {
   char *blob_path;
   bool fetched;
   char remote_blob[128];
+  unsigned char verify_digest[32];
+  char verify_hex[65];
   char *path_copy;
   char *last_slash;
   char *p;
@@ -780,6 +874,7 @@ bool blob_restore(dache *d, const blob_entry *entry) {
   }
 
   blob_path = get_blob_path(d, entry->sha256);
+
   if (!blob_path) {
     return false;
   }
@@ -807,11 +902,30 @@ bool blob_restore(dache *d, const blob_entry *entry) {
       free(blob_path);
       return false;
     }
+
+    if (digest_from_file(blob_path, verify_digest) != 0) {
+      fprintf(stderr, "[dache] failed to verify blob: %s\n", entry->sha256);
+      unlink(blob_path);
+      free(blob_path);
+      return false;
+    }
+
+    digest_to_hex(verify_digest, verify_hex);
+
+    if (strcmp(verify_hex, entry->sha256) != 0) {
+      fprintf(stderr, "[dache] blob integrity mismatch: expected %s, got %s\n",
+              entry->sha256, verify_hex);
+      unlink(blob_path);
+      free(blob_path);
+      return false;
+    }
   }
 
   path_copy = strdup(entry->path);
+
   if (path_copy) {
     last_slash = strrchr(path_copy, '/');
+
     if (last_slash) {
       *last_slash = '\0';
       p = path_copy;
@@ -824,8 +938,10 @@ bool blob_restore(dache *d, const blob_entry *entry) {
         }
         p++;
       }
+
       mkdir(path_copy, 0755);
     }
+
     free(path_copy);
   }
 
@@ -836,8 +952,8 @@ bool blob_restore(dache *d, const blob_entry *entry) {
   }
 
   chmod(entry->path, entry->mode);
-
   free(blob_path);
+
   return true;
 }
 
@@ -851,6 +967,7 @@ bool blob_manifest_write(const blob_manifest *m, const char *path) {
   }
 
   f = fopen(path, "w");
+
   if (!f) {
     return false;
   }
@@ -883,6 +1000,7 @@ static char *json_read_file(const char *path) {
   char *buf;
 
   f = fopen(path, "r");
+
   if (!f) {
     return NULL;
   }
@@ -892,6 +1010,7 @@ static char *json_read_file(const char *path) {
   fseek(f, 0, SEEK_SET);
 
   buf = malloc(len + 1);
+
   if (!buf) {
     fclose(f);
     return NULL;
@@ -907,6 +1026,7 @@ static const char *json_skip_ws(const char *p) {
   while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
     p++;
   }
+
   return p;
 }
 
@@ -915,23 +1035,29 @@ static const char *json_parse_string(const char *p, char *out,
   size_t i;
 
   p = json_skip_ws(p);
+
   if (*p != '"') {
     return NULL;
   }
+
   p++;
 
   i = 0;
+
   while (*p && *p != '"' && i < out_size - 1) {
     if (*p == '\\' && *(p + 1)) {
       p++;
     }
+
     out[i++] = *p++;
   }
+
   out[i] = '\0';
 
   if (*p == '"') {
     p++;
   }
+
   return p;
 }
 
@@ -940,6 +1066,7 @@ static const char *json_parse_number(const char *p, long *out) {
 
   p = json_skip_ws(p);
   *out = strtol(p, &end, 10);
+
   return end;
 }
 
@@ -952,11 +1079,13 @@ blob_manifest *blob_manifest_read(const char *path) {
   long val;
 
   json = json_read_file(path);
+
   if (!json) {
     return NULL;
   }
 
   m = blob_manifest_new();
+
   if (!m) {
     free(json);
     return NULL;
@@ -964,6 +1093,7 @@ blob_manifest *blob_manifest_read(const char *path) {
 
   p = json;
   p = strstr(p, "\"files\"");
+
   if (!p) {
     free(json);
     blob_manifest_free(m);
@@ -971,53 +1101,65 @@ blob_manifest *blob_manifest_read(const char *path) {
   }
 
   p = strchr(p, '[');
+
   if (!p) {
     free(json);
     blob_manifest_free(m);
     return NULL;
   }
+
   p++;
 
   while (*p) {
     p = json_skip_ws(p);
+
     if (*p == ']') {
       break;
     }
+
     if (*p == ',') {
       p++;
       continue;
     }
+
     if (*p != '{') {
       p++;
       continue;
     }
+
     p++;
 
     memset(&entry, 0, sizeof(entry));
 
     while (*p && *p != '}') {
       p = json_skip_ws(p);
+
       if (*p == '}') {
         break;
       }
+
       if (*p == ',') {
         p++;
         continue;
       }
+
       if (*p != '"') {
         p++;
         continue;
       }
 
       p = json_parse_string(p, key, sizeof(key));
+
       if (!p) {
         break;
       }
 
       p = json_skip_ws(p);
+
       if (*p == ':') {
         p++;
       }
+
       p = json_skip_ws(p);
 
       if (strcmp(key, "path") == 0) {
