@@ -126,8 +126,6 @@ aws s3 cp "s3://my-bucket/cache/$1.tar.gz" "$2" 2>/dev/null
 
 ## Why?
 
-### or: How I Learned to Stop Worrying and Love the .tar.gz
-
 This project came primarily from game-dev workflows where build cache systems are TOO COMPLICATED.
 
 Dache is a simple thing: just give inputs, outputs, env vars, and the command.
@@ -142,8 +140,6 @@ It does not try to canonicalize the environment.
 
 It does not try to "infer" what dotfiles your build tool implicitly touches by listening to syscalls.
 
-If you give Dache that information, consistently, it will cache; and if your build tool does that nonsense, that's on them, not us. If you understand your build tool -- tell us what it touches! We'll add it to the cache key. If your build tool doesn't even produce an artifact, but does something like upload a container to a local registry (looking at you, Docker) -- well, that's not cachable. Stop that.
-
 **Give us real inputs.** Not "whatever this script happens to touch." Actual files. Actual directories. Actual content. Not your shell history, the weather in Manila, or the contents of `/proc`.
 
 **Emit real outputs.** If your tool "builds a container and pushes it to a daemon," that's adorable, but it's not an output. We don't cache vibes. Make it output a `.tar.gz`, a `.wasm`, a fat `.jar`. Something we can hash and reuse.
@@ -151,12 +147,6 @@ If you give Dache that information, consistently, it will cache; and if your bui
 **Declare your dependencies.** We don't have time to spy on your build. You know what you used—just tell us. The alternative? We'd have to subscribe to syscalls or sandbox and chroot the entire build—and then you get... whatever Bazel and Nix are.
 
 **It's okay to rebuild sometimes.** You know what's faster than fighting the cache? `make clean && make`. We're not trying to be perfect. We're trying to be worth it. Dache is a convenience, not a doctrine.
-
-### The Deal
-
-If you give Dache clear inputs, clear outputs, and deterministic commands—it gives you less waiting, fewer re-compiles, and a snappy little wink every time it cache-hits.
-
-If you give Dache nothing? That's okay too. We'll still hang out. We just won't remember anything you did.
 
 ## How It Works
 

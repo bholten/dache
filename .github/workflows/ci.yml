@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-dev libssl-dev zlib1g-dev
+
+      - name: Build (${{ matrix.compiler }}, ${{ matrix.build_type }})
+        run: make ${{ matrix.build_type }} CC=${{ matrix.compiler }}
+
+      - name: Unit tests
+        run: make test CC=${{ matrix.compiler }}
+
+      - name: End-to-end tests
+        run: make e2e CC=${{ matrix.compiler }}

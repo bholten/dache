@@ -56,22 +56,48 @@ static char *get_default_hooks_dir(void) {
   return path;
 }
 
-static bool ensure_dir_exists(const char *path) {
+static bool mkdir_p(const char *path) {
+  char *copy;
+  char *p;
   struct stat st;
+  bool ok;
 
   if (stat(path, &st) == 0) {
     return S_ISDIR(st.st_mode);
   }
 
-  /* Create directory (and parent if needed) */
-  /* Simple approach: just try mkdir, assume parent exists */
-  return mkdir(path, 0755) == 0;
+  copy = strdup(path);
+
+  if (!copy) {
+    return false;
+  }
+
+  ok = true;
+
+  for (p = copy + 1; *p; p++) {
+    if (*p == '/') {
+      *p = '\0';
+
+      if (mkdir(copy, 0755) != 0 && stat(copy, &st) != 0) {
+        ok = false;
+        break;
+      }
+
+      *p = '/';
+    }
+  }
+
+  if (ok && mkdir(copy, 0755) != 0 &&
+      (stat(copy, &st) != 0 || !S_ISDIR(st.st_mode))) {
+    ok = false;
+  }
+
+  free(copy);
+  return ok;
 }
 
 dache *dache_new(const char *cache_dir, const char *remote_dir) {
   dache *d;
-  char *parent;
-  char *last_slash;
 
   d = malloc(sizeof(dache));
 
@@ -93,16 +119,10 @@ dache *dache_new(const char *cache_dir, const char *remote_dir) {
   d->remote_dir = remote_dir ? strdup(remote_dir) : NULL;
   d->hooks_dir = get_default_hooks_dir();
 
-  if (!ensure_dir_exists(d->cache_dir)) {
-    parent = strdup(d->cache_dir);
-    last_slash = strrchr(parent, '/');
-
-    if (last_slash) {
-      *last_slash = '\0';
-      ensure_dir_exists(parent);
-      ensure_dir_exists(d->cache_dir);
-    }
-    free(parent);
+  if (!mkdir_p(d->cache_dir)) {
+    fprintf(stderr, "[dache] cannot create cache dir: %s\n", d->cache_dir);
+    dache_free(d);
+    return NULL;
   }
 
   return d;
@@ -234,7 +254,6 @@ static bool remote_file_put(dache *d, const char *local_path,
   char *full_remote;
   char *parent;
   char *last_slash;
-  char *p;
   bool ok;
 
   if (!d->remote_dir) {
@@ -254,19 +273,7 @@ static bool remote_file_put(dache *d, const char *local_path,
 
   if (last_slash) {
     *last_slash = '\0';
-    p = parent;
-
-    while (*p) {
-      if (*p == '/' && p != parent) {
-        *p = '\0';
-        mkdir(parent, 0755);
-        *p = '/';
-      }
-
-      p++;
-    }
-
-    mkdir(parent, 0755);
+    mkdir_p(parent);
   }
 
   free(parent);
@@ -277,36 +284,112 @@ static bool remote_file_put(dache *d, const char *local_path,
   return ok;
 }
 
-static int digest(EVP_MD_CTX *ctx, const char *path) {
+/*
+ * Each section item is length-prefixed ("N:" + payload + "\n") so that
+ * adjacent items can't be ambiguously concatenated into a colliding key.
+ */
+static bool digest_framed(EVP_MD_CTX *ctx, const void *data, size_t n) {
+  char header[32];
+  int hlen;
+
+  hlen = snprintf(header, sizeof(header), "%lu:", (unsigned long)n);
+
+  if (hlen < 0 || (size_t)hlen >= sizeof(header)) {
+    return false;
+  }
+
+  if (!EVP_DigestUpdate(ctx, header, (size_t)hlen)) {
+    return false;
+  }
+  if (n > 0 && !EVP_DigestUpdate(ctx, data, n)) {
+    return false;
+  }
+  if (!EVP_DigestUpdate(ctx, "\n", 1)) {
+    return false;
+  }
+
+  return true;
+}
+
+static int digest_file_framed(EVP_MD_CTX *ctx, const char *path) {
+  struct stat st;
   FILE *f;
   unsigned char buff[65536];
-  size_t n;
+  char header[64];
+  int hlen;
+  size_t n, remaining;
+
+  if (stat(path, &st) != 0) {
+    fprintf(stderr, "[dache] could not stat input: %s\n", path);
+    return -1;
+  }
+
+  hlen = snprintf(header, sizeof(header), "%lu:", (unsigned long)st.st_size);
+
+  if (hlen < 0 || (size_t)hlen >= sizeof(header)) {
+    return -2;
+  }
+
+  if (!EVP_DigestUpdate(ctx, header, (size_t)hlen)) {
+    return -3;
+  }
 
   f = fopen(path, "rb");
 
   if (!f) {
-    fprintf(stderr, "[dache] could not open file: %s\n", path);
-    return -1;
+    fprintf(stderr, "[dache] could not open input: %s\n", path);
+    return -4;
   }
 
-  while ((n = fread(buff, 1, sizeof(buff), f)) > 0) {
+  remaining = (size_t)st.st_size;
+
+  while (remaining > 0) {
+    n = fread(buff, 1, sizeof(buff), f);
+
+    if (n == 0) {
+      break;
+    }
+
+    if (n > remaining) {
+      n = remaining;
+    }
+
     if (!EVP_DigestUpdate(ctx, buff, n)) {
       fclose(f);
-      return -4;
+      return -5;
     }
+
+    remaining -= n;
+  }
+
+  if (ferror(f)) {
+    fclose(f);
+    return -6;
   }
 
   fclose(f);
 
+  if (remaining != 0) {
+    fprintf(stderr, "[dache] input file shrank during hashing: %s\n", path);
+    return -7;
+  }
+
+  if (!EVP_DigestUpdate(ctx, "\n", 1)) {
+    return -8;
+  }
+
   return 0;
 }
+
+static int strptr_compare(const void *a, const void *b);
 
 int dache_cache_key(const char **envv, int envc, const char **inputv,
                     int inputc, const char **commandv, int commandc,
                     unsigned char out_digest[32]) {
   EVP_MD_CTX *ctx;
   const EVP_MD *md;
-  int i, j, k, code;
+  const char **env_sorted;
+  int i, code;
   unsigned int len;
 
   ctx = EVP_MD_CTX_new();
@@ -322,58 +405,77 @@ int dache_cache_key(const char **envv, int envc, const char **inputv,
     return -2;
   }
 
-  if (!EVP_DigestUpdate(ctx, "env:\n", 5)) {
+  /* Hash a version tag so future format changes invalidate old keys. */
+  if (!EVP_DigestUpdate(ctx, "dache-key:v1\n", 13)) {
     EVP_MD_CTX_free(ctx);
     return -3;
   }
 
-  for (i = 0; i < envc; i++) {
-    if (!EVP_DigestUpdate(ctx, envv[i], strlen(envv[i]))) {
+  /* Sort env vars: argv order should not affect the key. */
+  env_sorted = NULL;
+
+  if (envc > 0) {
+    env_sorted = malloc((size_t)envc * sizeof(char *));
+
+    if (!env_sorted) {
       EVP_MD_CTX_free(ctx);
       return -4;
     }
 
-    if (!EVP_DigestUpdate(ctx, "\n", 1)) {
+    for (i = 0; i < envc; i++) {
+      env_sorted[i] = envv[i];
+    }
+
+    qsort(env_sorted, (size_t)envc, sizeof(char *), strptr_compare);
+  }
+
+  if (!EVP_DigestUpdate(ctx, "env:\n", 5)) {
+    free(env_sorted);
+    EVP_MD_CTX_free(ctx);
+    return -5;
+  }
+
+  for (i = 0; i < envc; i++) {
+    if (!digest_framed(ctx, env_sorted[i], strlen(env_sorted[i]))) {
+      free(env_sorted);
       EVP_MD_CTX_free(ctx);
-      return -5;
+      return -6;
     }
   }
+
+  free(env_sorted);
 
   if (!EVP_DigestUpdate(ctx, "inputs:\n", 8)) {
     EVP_MD_CTX_free(ctx);
-    return -6;
+    return -7;
   }
 
-  for (j = 0; j < inputc; j++) {
-    code = digest(ctx, inputv[j]);
+  /* Caller sorts input paths via expand_paths; preserve that order. */
+  for (i = 0; i < inputc; i++) {
+    if (!digest_framed(ctx, inputv[i], strlen(inputv[i]))) {
+      EVP_MD_CTX_free(ctx);
+      return -8;
+    }
+
+    code = digest_file_framed(ctx, inputv[i]);
 
     if (code != 0) {
-      fprintf(stderr, "[dache] failed to hash input: %s\n", inputv[j]);
+      fprintf(stderr, "[dache] failed to hash input: %s\n", inputv[i]);
       EVP_MD_CTX_free(ctx);
-      return -7;
+      return -9;
     }
-  }
-
-  if (!EVP_DigestUpdate(ctx, "\n", 1)) {
-    EVP_MD_CTX_free(ctx);
-    return -8;
   }
 
   if (!EVP_DigestUpdate(ctx, "command:\n", 9)) {
     EVP_MD_CTX_free(ctx);
-    return -9;
+    return -10;
   }
 
-  for (k = 0; k < commandc; k++) {
-    if (!EVP_DigestUpdate(ctx, commandv[k], strlen(commandv[k]))) {
+  for (i = 0; i < commandc; i++) {
+    if (!digest_framed(ctx, commandv[i], strlen(commandv[i]))) {
       EVP_MD_CTX_free(ctx);
-      return -10;
+      return -11;
     }
-  }
-
-  if (!EVP_DigestUpdate(ctx, "\n", 1)) {
-    EVP_MD_CTX_free(ctx);
-    return -11;
   }
 
   len = 0;
@@ -577,9 +679,14 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
   size_t path_len, name_len, full_len;
   char *full_path;
 
-  if (stat(path, &st) != 0) {
+  if (lstat(path, &st) != 0) {
     fprintf(stderr, "[dache] warning: cannot stat '%s'\n", path);
     return false;
+  }
+
+  if (S_ISLNK(st.st_mode)) {
+    fprintf(stderr, "[dache] warning: skipping symlink '%s'\n", path);
+    return true;
   }
 
   if (S_ISREG(st.st_mode)) {
@@ -593,12 +700,13 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
       return false;
     }
 
+    path_len = strlen(path);
+
     while ((entry = readdir(dir)) != NULL) {
       if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
         continue;
       }
 
-      path_len = strlen(path);
       name_len = strlen(entry->d_name);
       full_len = path_len + 1 + name_len + 1;
       full_path = malloc(full_len);
@@ -608,7 +716,7 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
         return false;
       }
 
-      if (path[path_len - 1] == '/') {
+      if (path_len > 0 && path[path_len - 1] == '/') {
         snprintf(full_path, full_len, "%s%s", path, entry->d_name);
       } else {
         snprintf(full_path, full_len, "%s/%s", path, entry->d_name);
@@ -626,7 +734,7 @@ static bool expand_path_recursive(expanded_paths *ep, const char *path) {
   return true;
 }
 
-static int path_compare(const void *a, const void *b) {
+static int strptr_compare(const void *a, const void *b) {
   return strcmp(*(const char **)a, *(const char **)b);
 }
 
@@ -645,7 +753,7 @@ expanded_paths *expand_paths(const char **pathv, int pathc) {
   }
 
   if (ep->count > 1) {
-    qsort(ep->paths, ep->count, sizeof(char *), path_compare);
+    qsort(ep->paths, ep->count, sizeof(char *), strptr_compare);
   }
 
   return ep;
@@ -830,7 +938,11 @@ bool blob_store(dache *d, const char *path, blob_manifest *m) {
     return false;
   }
 
-  ensure_dir_exists(blob_dir);
+  if (!mkdir_p(blob_dir)) {
+    fprintf(stderr, "[dache] cannot create blob dir: %s\n", blob_dir);
+    free(blob_dir);
+    return false;
+  }
   free(blob_dir);
 
   blob_path = get_blob_path(d, entry.sha256);
@@ -861,6 +973,7 @@ bool blob_store(dache *d, const char *path, blob_manifest *m) {
 
 bool blob_restore(dache *d, const blob_entry *entry) {
   char *blob_path;
+  char *blob_dir;
   bool fetched;
   char remote_blob[128];
   unsigned char verify_digest[32];
@@ -872,6 +985,16 @@ bool blob_restore(dache *d, const blob_entry *entry) {
   if (!d || !entry) {
     return false;
   }
+
+  blob_dir = get_blob_dir(d);
+
+  if (!blob_dir || !mkdir_p(blob_dir)) {
+    fprintf(stderr, "[dache] cannot create blob dir\n");
+    free(blob_dir);
+    return false;
+  }
+
+  free(blob_dir);
 
   blob_path = get_blob_path(d, entry->sha256);
 
@@ -957,10 +1080,76 @@ bool blob_restore(dache *d, const blob_entry *entry) {
   return true;
 }
 
+static bool json_write_escaped(FILE *f, const char *s) {
+  const unsigned char *p;
+
+  if (fputc('"', f) == EOF) {
+    return false;
+  }
+
+  for (p = (const unsigned char *)s; *p; p++) {
+    switch (*p) {
+    case '"':
+      if (fputs("\\\"", f) == EOF) {
+        return false;
+      }
+      break;
+    case '\\':
+      if (fputs("\\\\", f) == EOF) {
+        return false;
+      }
+      break;
+    case '\b':
+      if (fputs("\\b", f) == EOF) {
+        return false;
+      }
+      break;
+    case '\f':
+      if (fputs("\\f", f) == EOF) {
+        return false;
+      }
+      break;
+    case '\n':
+      if (fputs("\\n", f) == EOF) {
+        return false;
+      }
+      break;
+    case '\r':
+      if (fputs("\\r", f) == EOF) {
+        return false;
+      }
+      break;
+    case '\t':
+      if (fputs("\\t", f) == EOF) {
+        return false;
+      }
+      break;
+    default:
+      if (*p < 0x20) {
+        if (fprintf(f, "\\u%04x", *p) < 0) {
+          return false;
+        }
+      } else {
+        if (fputc(*p, f) == EOF) {
+          return false;
+        }
+      }
+      break;
+    }
+  }
+
+  if (fputc('"', f) == EOF) {
+    return false;
+  }
+
+  return true;
+}
+
 bool blob_manifest_write(const blob_manifest *m, const char *path) {
   FILE *f;
   int i;
   const blob_entry *e;
+  bool ok;
 
   if (!m || !path) {
     return false;
@@ -972,31 +1161,72 @@ bool blob_manifest_write(const blob_manifest *m, const char *path) {
     return false;
   }
 
-  fprintf(f, "{\n");
-  fprintf(f, "  \"version\": 1,\n");
-  fprintf(f, "  \"type\": \"individual\",\n");
-  fprintf(f, "  \"files\": [\n");
+  ok = true;
 
-  for (i = 0; i < m->count; i++) {
-    e = &m->entries[i];
-    fprintf(f, "    {\n");
-    fprintf(f, "      \"path\": \"%s\",\n", e->path);
-    fprintf(f, "      \"sha256\": \"%s\",\n", e->sha256);
-    fprintf(f, "      \"size\": %lu,\n", (unsigned long)e->size);
-    fprintf(f, "      \"mode\": %d\n", e->mode);
-    fprintf(f, "    }%s\n", (i < m->count - 1) ? "," : "");
+  if (fprintf(f, "{\n") < 0) {
+    ok = false;
+  }
+  if (ok && fprintf(f, "  \"version\": 1,\n") < 0) {
+    ok = false;
+  }
+  if (ok && fprintf(f, "  \"type\": \"individual\",\n") < 0) {
+    ok = false;
+  }
+  if (ok && fprintf(f, "  \"files\": [\n") < 0) {
+    ok = false;
   }
 
-  fprintf(f, "  ]\n");
-  fprintf(f, "}\n");
+  for (i = 0; ok && i < m->count; i++) {
+    e = &m->entries[i];
+    if (fprintf(f, "    {\n      \"path\": ") < 0) {
+      ok = false;
+      break;
+    }
+    if (!json_write_escaped(f, e->path)) {
+      ok = false;
+      break;
+    }
+    if (fprintf(f, ",\n      \"sha256\": ") < 0) {
+      ok = false;
+      break;
+    }
+    if (!json_write_escaped(f, e->sha256)) {
+      ok = false;
+      break;
+    }
+    if (fprintf(f, ",\n      \"size\": %lu,\n", (unsigned long)e->size) < 0) {
+      ok = false;
+      break;
+    }
+    if (fprintf(f, "      \"mode\": %d\n", e->mode) < 0) {
+      ok = false;
+      break;
+    }
+    if (fprintf(f, "    }%s\n", (i < m->count - 1) ? "," : "") < 0) {
+      ok = false;
+      break;
+    }
+  }
 
-  fclose(f);
-  return true;
+  if (ok && fprintf(f, "  ]\n}\n") < 0) {
+    ok = false;
+  }
+
+  if (fclose(f) != 0) {
+    ok = false;
+  }
+
+  if (!ok) {
+    unlink(path);
+  }
+
+  return ok;
 }
 
 static char *json_read_file(const char *path) {
   FILE *f;
   long len;
+  size_t n;
   char *buf;
 
   f = fopen(path, "r");
@@ -1005,18 +1235,38 @@ static char *json_read_file(const char *path) {
     return NULL;
   }
 
-  fseek(f, 0, SEEK_END);
-  len = ftell(f);
-  fseek(f, 0, SEEK_SET);
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
 
-  buf = malloc(len + 1);
+  len = ftell(f);
+
+  if (len < 0) {
+    fclose(f);
+    return NULL;
+  }
+
+  if (fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return NULL;
+  }
+
+  buf = malloc((size_t)len + 1);
 
   if (!buf) {
     fclose(f);
     return NULL;
   }
 
-  fread(buf, 1, len, f);
+  n = fread(buf, 1, (size_t)len, f);
+
+  if (n != (size_t)len) {
+    free(buf);
+    fclose(f);
+    return NULL;
+  }
+
   buf[len] = '\0';
   fclose(f);
   return buf;
@@ -1033,6 +1283,7 @@ static const char *json_skip_ws(const char *p) {
 static const char *json_parse_string(const char *p, char *out,
                                      size_t out_size) {
   size_t i;
+  char c;
 
   p = json_skip_ws(p);
 
@@ -1047,9 +1298,29 @@ static const char *json_parse_string(const char *p, char *out,
   while (*p && *p != '"' && i < out_size - 1) {
     if (*p == '\\' && *(p + 1)) {
       p++;
+      switch (*p) {
+      case '"': c = '"'; break;
+      case '\\': c = '\\'; break;
+      case '/': c = '/'; break;
+      case 'b': c = '\b'; break;
+      case 'f': c = '\f'; break;
+      case 'n': c = '\n'; break;
+      case 'r': c = '\r'; break;
+      case 't': c = '\t'; break;
+      case 'u':
+        /* Skip \uXXXX; we don't decode unicode. */
+        if (p[1] && p[2] && p[3] && p[4]) {
+          p += 4;
+        }
+        p++;
+        continue;
+      default: c = *p; break;
+      }
+      out[i++] = c;
+      p++;
+    } else {
+      out[i++] = *p++;
     }
-
-    out[i++] = *p++;
   }
 
   out[i] = '\0';
