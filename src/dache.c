@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -810,8 +811,8 @@ static bool copy_file(const char *src, const char *dest) {
     return false;
   }
 
-  size_t n;  
-  
+  size_t n;
+
   while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
     if (fwrite(buf, 1, n, out) != n) {
       fclose(in);
@@ -1073,7 +1074,21 @@ bool blob_manifest_write(const blob_manifest *m, const char *path) {
     return false;
   }
 
-  FILE *f = fopen(path, "w");
+  /*
+   * Write to <path>.tmp.<pid> then atomically rename. Mirrors copy_file +
+   * write_archive: parallel snapshots against the same manifest can't
+   * leave a half-written JSON behind.
+   */
+  char tmp_path[PATH_MAX];
+  int n =
+      snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld", path, (long)getpid());
+
+  if (n < 0 || (size_t)n >= sizeof(tmp_path)) {
+    fprintf(stderr, "[dache] manifest path too long: %s\n", path);
+    return false;
+  }
+
+  FILE *f = fopen(tmp_path, "w");
 
   if (!f) {
     return false;
@@ -1144,8 +1159,15 @@ bool blob_manifest_write(const blob_manifest *m, const char *path) {
     ok = false;
   }
 
-  if (!ok) {
-    unlink(path);
+  if (ok) {
+    if (rename(tmp_path, path) != 0) {
+      fprintf(stderr, "[dache] manifest rename '%s' -> '%s' failed: %s\n",
+              tmp_path, path, strerror(errno));
+      unlink(tmp_path);
+      ok = false;
+    }
+  } else {
+    unlink(tmp_path);
   }
 
   return ok;
