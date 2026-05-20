@@ -74,10 +74,7 @@ static void print_version(void) {
 }
 
 static int run_command(const char **argv) {
-  pid_t pid;
-  int status;
-
-  pid = fork();
+  pid_t pid = fork();
 
   if (pid < 0) {
     perror("[dache] fork");
@@ -89,6 +86,8 @@ static int run_command(const char **argv) {
     perror("[dache] execvp");
     _exit(127);
   }
+
+  int status;
 
   if (waitpid(pid, &status, 0) < 0) {
     perror("[dache] waitpid");
@@ -103,17 +102,6 @@ static int run_command(const char **argv) {
 }
 
 static int cmd_snapshot(int argc, char **argv) {
-  const char *output_file;
-  const char *remote_dir;
-  int opt;
-  dache *d;
-  const char **pathv;
-  int pathc;
-  expanded_paths *files;
-  blob_manifest *manifest;
-  int stored;
-  int i;
-
   static struct option long_options[] = {
       {"output", required_argument, 0, 'o'},
       {"remote", required_argument, 0, 'r'},
@@ -121,9 +109,11 @@ static int cmd_snapshot(int argc, char **argv) {
       {0,        0,                 0, 0  }
   };
 
-  output_file = NULL;
-  remote_dir = NULL;
+  const char *output_file = NULL;
+  const char *remote_dir = NULL;
   optind = 1;
+
+  int opt;
 
   while ((opt = getopt_long(argc, argv, "+o:r:h", long_options, NULL)) != -1) {
     switch (opt) {
@@ -151,16 +141,15 @@ static int cmd_snapshot(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  d = dache_new(NULL, remote_dir);
+  dache *d = dache_new(NULL, remote_dir);
 
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
     return EXIT_FAILURE;
   }
 
-  pathv = (const char **)&argv[optind];
-  pathc = argc - optind;
-  files = expand_paths(pathv, pathc);
+  expanded_paths *files =
+      expand_paths((const char **)&argv[optind], argc - optind);
 
   if (!files || files->count == 0) {
     fprintf(stderr, "[dache] error: no files found to snapshot\n");
@@ -173,7 +162,7 @@ static int cmd_snapshot(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  manifest = blob_manifest_new();
+  blob_manifest *manifest = blob_manifest_new();
 
   if (!manifest) {
     expanded_paths_free(files);
@@ -181,9 +170,9 @@ static int cmd_snapshot(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  stored = 0;
+  int stored = 0;
 
-  for (i = 0; i < files->count; i++) {
+  for (int i = 0; i < files->count; i++) {
     if (blob_store(d, files->paths[i], manifest)) {
       stored++;
     }
@@ -204,28 +193,20 @@ static int cmd_snapshot(int argc, char **argv) {
   blob_manifest_free(manifest);
   expanded_paths_free(files);
   dache_free(d);
-
   return EXIT_SUCCESS;
 }
 
 static int cmd_restore(int argc, char **argv) {
-  const char *remote_dir;
-  int opt;
-  const char *manifest_file;
-  dache *d;
-  blob_manifest *manifest;
-  int restored;
-  int total;
-  int i;
-
   static struct option long_options[] = {
       {"remote", required_argument, 0, 'r'},
       {"help",   no_argument,       0, 'h'},
       {0,        0,                 0, 0  }
   };
 
-  remote_dir = NULL;
+  const char *remote_dir = NULL;
   optind = 1;
+
+  int opt;
 
   while ((opt = getopt_long(argc, argv, "+r:h", long_options, NULL)) != -1) {
     switch (opt) {
@@ -246,16 +227,16 @@ static int cmd_restore(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  manifest_file = argv[optind];
+  const char *manifest_file = argv[optind];
 
-  d = dache_new(NULL, remote_dir);
+  dache *d = dache_new(NULL, remote_dir);
 
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
     return EXIT_FAILURE;
   }
 
-  manifest = blob_manifest_read(manifest_file);
+  blob_manifest *manifest = blob_manifest_read(manifest_file);
 
   if (!manifest) {
     fprintf(stderr, "[dache] error: failed to read manifest: %s\n",
@@ -264,10 +245,10 @@ static int cmd_restore(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  restored = 0;
-  total = manifest->count;
+  int restored = 0;
+  int total = manifest->count;
 
-  for (i = 0; i < manifest->count; i++) {
+  for (int i = 0; i < manifest->count; i++) {
     if (blob_restore(d, &manifest->entries[i])) {
       restored++;
     }
@@ -282,17 +263,6 @@ static int cmd_restore(int argc, char **argv) {
 }
 
 static int cmd_cache(int argc, char **argv) {
-  struct dache_config cfg;
-  const char *remote_dir;
-  int opt;
-  dache *d;
-  expanded_paths *inputs;
-  unsigned char digest[32];
-  char cache_key[65];
-  int code;
-  int result;
-  expanded_paths *outputs;
-
   static struct option long_options[] = {
       {"input",   required_argument, 0, 'i'},
       {"output",  required_argument, 0, 'o'},
@@ -303,9 +273,12 @@ static int cmd_cache(int argc, char **argv) {
       {0,         0,                 0, 0  }
   };
 
+  struct dache_config cfg;
   config_init(&cfg);
-  remote_dir = NULL;
+  const char *remote_dir = NULL;
   optind = 1;
+
+  int opt;
 
   while ((opt = getopt_long(argc, argv, "+i:o:e:r:hv", long_options, NULL)) !=
          -1) {
@@ -314,29 +287,35 @@ static int cmd_cache(int argc, char **argv) {
       if (cfg.inputc < MAX_ARGS) {
         cfg.inputv[cfg.inputc++] = optarg;
       }
+
       break;
     case 'o':
       if (cfg.outputc < MAX_ARGS) {
         cfg.outputv[cfg.outputc++] = optarg;
       }
+
       break;
     case 'e':
       if (cfg.envc < MAX_ARGS) {
         cfg.envv[cfg.envc++] = optarg;
       }
+
       break;
     case 'r': remote_dir = optarg; break;
     case 'h':
       show_help();
       config_free(&cfg);
+
       return EXIT_SUCCESS;
     case 'v':
       print_version();
       config_free(&cfg);
+
       return EXIT_SUCCESS;
     default:
       show_help();
       config_free(&cfg);
+
       return EXIT_FAILURE;
     }
   }
@@ -364,7 +343,7 @@ static int cmd_cache(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  d = dache_new(NULL, remote_dir);
+  dache *d = dache_new(NULL, remote_dir);
 
   if (!d) {
     fprintf(stderr, "[dache] error: failed to initialize cache\n");
@@ -372,7 +351,7 @@ static int cmd_cache(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  inputs = expand_paths(cfg.inputv, cfg.inputc);
+  expanded_paths *inputs = expand_paths(cfg.inputv, cfg.inputc);
 
   if (!inputs) {
     fprintf(stderr, "[dache] error: failed to expand input paths\n");
@@ -389,9 +368,9 @@ static int cmd_cache(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  code = dache_cache_key(cfg.envv, cfg.envc, (const char **)inputs->paths,
-                         inputs->count, cfg.commandv, cfg.commandc, digest);
-
+  uint8_t digest[32];
+  int code = dache_cache_key(cfg.envv, cfg.envc, (const char **)inputs->paths,
+                             inputs->count, cfg.commandv, cfg.commandc, digest);
   if (code != 0) {
     fprintf(stderr, "[dache] error: failed to compute cache key (code %d)\n",
             code);
@@ -401,6 +380,7 @@ static int cmd_cache(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
+  char cache_key[65];
   digest_to_hex(digest, cache_key);
 
   if (dache_cache_get(d, cache_key)) {
@@ -412,7 +392,7 @@ static int cmd_cache(int argc, char **argv) {
 
   fprintf(stderr, "[dache] cache miss, running command...\n");
 
-  result = run_command(cfg.commandv);
+  int result = run_command(cfg.commandv);
 
   if (result != 0) {
     fprintf(stderr, "[dache] command failed with exit code %d\n", result);
@@ -422,7 +402,7 @@ static int cmd_cache(int argc, char **argv) {
     return result;
   }
 
-  outputs = expand_paths(cfg.outputv, cfg.outputc);
+  expanded_paths *outputs = expand_paths(cfg.outputv, cfg.outputc);
 
   if (!outputs || outputs->count == 0) {
     fprintf(stderr, "[dache] warning: no output files found to cache\n");

@@ -1,13 +1,14 @@
 #ifndef DACHE_H
 #define DACHE_H
 
+#include <assert.h>
+#include <limits.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
-/* C89 compatibility */
-#ifndef __cplusplus
-typedef int bool;
-#define true 1
-#define false 0
+#ifndef PATH_MAX
+#define PATH_MAX 4096
 #endif
 
 typedef struct dache {
@@ -20,7 +21,7 @@ dache *dache_new(const char *cache_dir, const char *remote_dir);
 void dache_free(dache *d);
 int dache_cache_key(const char **envv, int envc, const char **inputv,
                     int inputc, const char **commandv, int commandc,
-                    unsigned char out_digest[32]);
+                    uint8_t out_digest[32]);
 bool dache_cache_get(dache *d, const char *key);
 bool dache_cache_put(dache *d, const char *key, const char **outputv,
                      int outputc);
@@ -30,8 +31,8 @@ bool unarchive(const char *src, const char *dest);
 bool compress_file(const char *src, const char *dest);
 bool decompress_file(const char *src, const char *dest);
 
-int digest_from_file(const char *path, unsigned char digest_out[32]);
-void digest_to_hex(const unsigned char digest[32], char hex_out[65]);
+int digest_from_file(const char *path, uint8_t digest_out[32]);
+void digest_to_hex(const uint8_t digest[32], char hex_out[65]);
 
 typedef struct {
   char **paths;
@@ -42,12 +43,22 @@ typedef struct {
 expanded_paths *expand_paths(const char **pathv, int pathc);
 void expanded_paths_free(expanded_paths *ep);
 
+/*
+ * blob_entry.path is fixed-size for now; widening to dynamic / PATH_MAX
+ * is tracked in TODO.md. The static_assert keeps us honest about how
+ * little headroom we have versus a real POSIX path.
+ */
 typedef struct {
   char path[512];
   char sha256[65];
   size_t size;
   int mode;
 } blob_entry;
+
+static_assert(sizeof(((blob_entry *)0)->path) <= PATH_MAX,
+              "blob_entry.path must fit within PATH_MAX");
+static_assert(sizeof(((blob_entry *)0)->sha256) == 65,
+              "blob_entry.sha256 must hold 64 hex chars + NUL");
 
 typedef struct {
   blob_entry *entries;
