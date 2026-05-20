@@ -2,6 +2,7 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,21 @@
 #include "dache.h"
 
 bool write_archive(const char **src, const char *dest) {
+  /*
+   * Bugfix: Write to <dest>.tmp.<pid> then atomically rename to
+   * <dest>. Two parallel dache invocations on the same key write to
+   * distinct temp files; whichever renames last wins, and neither
+   * sees a half-written archive.
+   */
+  char tmp_path[PATH_MAX];
+  int n =
+      snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld", dest, (long)getpid());
+
+  if (n < 0 || (size_t)n >= sizeof(tmp_path)) {
+    fprintf(stderr, "[dache] archive dest path too long: %s\n", dest);
+    return false;
+  }
+
   struct archive *a = archive_write_new();
 
   if (!a) {
@@ -27,7 +43,7 @@ bool write_archive(const char **src, const char *dest) {
     return false;
   }
 
-  if (archive_write_open_filename(a, dest) != ARCHIVE_OK) {
+  if (archive_write_open_filename(a, tmp_path) != ARCHIVE_OK) {
     fprintf(stderr, "[dache] archive open failed: %s\n",
             archive_error_string(a));
     archive_write_free(a);
@@ -39,6 +55,7 @@ bool write_archive(const char **src, const char *dest) {
   if (!entry) {
     archive_write_close(a);
     archive_write_free(a);
+    unlink(tmp_path);
     return false;
   }
 
@@ -105,8 +122,15 @@ bool write_archive(const char **src, const char *dest) {
 
   archive_write_free(a);
 
-  if (!ok) {
-    unlink(dest);
+  if (ok) {
+    if (rename(tmp_path, dest) != 0) {
+      fprintf(stderr, "[dache] archive rename '%s' -> '%s' failed: %s\n",
+              tmp_path, dest, strerror(errno));
+      unlink(tmp_path);
+      ok = false;
+    }
+  } else {
+    unlink(tmp_path);
   }
 
   return ok;
