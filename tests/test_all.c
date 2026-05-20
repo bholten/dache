@@ -107,24 +107,21 @@ static char *tmp_path(const char *suffix) {
   return p;
 }
 
-static void write_file(const char *path, const char *content) {
+static void write_file_bytes(const char *path, const void *data, size_t n) {
   FILE *f = fopen(path, "wb");
   if (!f) {
     fprintf(stderr, "cannot create %s: %s\n", path, strerror(errno));
     exit(2);
   }
-  fwrite(content, 1, strlen(content), f);
-  fclose(f);
-}
-
-static void write_file_bytes(const char *path, const void *data, size_t n) {
-  FILE *f = fopen(path, "wb");
-  if (!f) exit(2);
   fwrite(data, 1, n, f);
   fclose(f);
 }
 
-static int file_exists(const char *path) {
+static void write_file(const char *path, const char *content) {
+  write_file_bytes(path, content, strlen(content));
+}
+
+static bool file_exists(const char *path) {
   struct stat st;
   return stat(path, &st) == 0;
 }
@@ -136,11 +133,12 @@ static void test_digest_empty_file(void) {
   static const char *expected =
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
   char *path = tmp_path("empty");
-  unsigned char digest[32];
-  char hex[65];
-
   write_file(path, "");
+
+  uint8_t digest[32];
   T_EQ_INT(digest_from_file(path, digest), 0);
+
+  char hex[65];
   digest_to_hex(digest, hex);
   T_EQ_STR(hex, expected);
 
@@ -153,11 +151,12 @@ static void test_digest_known_content(void) {
   static const char *expected =
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
   char *path = tmp_path("abc");
-  unsigned char digest[32];
-  char hex[65];
-
   write_file(path, "abc");
+
+  uint8_t digest[32];
   T_EQ_INT(digest_from_file(path, digest), 0);
+
+  char hex[65];
   digest_to_hex(digest, hex);
   T_EQ_STR(hex, expected);
 
@@ -166,23 +165,23 @@ static void test_digest_known_content(void) {
 }
 
 static void test_digest_missing_file(void) {
-  unsigned char digest[32];
+  uint8_t digest[32];
   T_OK(digest_from_file("/nonexistent/path/zzz", digest) != 0);
 }
 
 static void test_digest_to_hex_zeros(void) {
-  unsigned char zeros[32];
+  uint8_t zeros[32] = {0};
   char hex[65];
-  memset(zeros, 0, sizeof(zeros));
   digest_to_hex(zeros, hex);
-  T_EQ_STR(hex, "0000000000000000000000000000000000000000000000000000000000000000");
+  T_EQ_STR(hex,
+           "0000000000000000000000000000000000000000000000000000000000000000");
 }
 
 /* ---------- cache key tests ---------- */
 
 static void compute_key(const char **env, int envc, const char **inputs,
                         int inputc, const char **cmd, int cmdc, char *out_hex) {
-  unsigned char digest[32];
+  uint8_t digest[32];
   int code = dache_cache_key(env, envc, inputs, inputc, cmd, cmdc, digest);
   if (code != 0) {
     snprintf(out_hex, 65, "ERR%d", code);
@@ -349,18 +348,16 @@ static void test_key_command_order_matters(void) {
 static void test_key_binary_input(void) {
   /* Verify the digest covers exact file length, not just NUL-terminated. */
   char *path = tmp_path("bin_input");
-  const char *inputs[1];
-  const char *cmd[1];
+  const char *inputs[1] = {path};
+  const char *cmd[1] = {"make"};
+
+  uint8_t a[8], b[8];
+  for (int i = 0; i < 8; i++) {
+    a[i] = (uint8_t)i;
+    b[i] = (uint8_t)(i + 1);
+  }
+
   char k1[65], k2[65];
-  unsigned char a[8];
-  unsigned char b[8];
-  int i;
-
-  for (i = 0; i < 8; i++) { a[i] = (unsigned char)i; b[i] = (unsigned char)(i + 1); }
-
-  inputs[0] = path;
-  cmd[0] = "make";
-
   write_file_bytes(path, a, sizeof(a));
   compute_key(NULL, 0, inputs, 1, cmd, 1, k1);
 
@@ -374,61 +371,33 @@ static void test_key_binary_input(void) {
 
 /* ---------- manifest tests ---------- */
 
-static void test_manifest_roundtrip(void) {
-  blob_manifest *out;
-  blob_manifest *in;
-  blob_entry e1, e2;
+static void test_manifest_read_known_json(void) {
+  /* Write a hand-crafted manifest and verify the parser handles it. */
   char *path = tmp_path("manifest.json");
+  FILE *f = fopen(path, "w");
+  fprintf(f,
+          "{\n"
+          "  \"version\": 1,\n"
+          "  \"type\": \"individual\",\n"
+          "  \"files\": [\n"
+          "    {\"path\": \"a/b.txt\", \"sha256\": \"deadbeef00000000000000000000000000000000000000000000000000000000\", \"size\": 42, \"mode\": 420},\n"
+          "    {\"path\": \"x/y.bin\", \"sha256\": \"cafebabe00000000000000000000000000000000000000000000000000000000\", \"size\": 99, \"mode\": 493}\n"
+          "  ]\n}\n");
+  fclose(f);
 
-  out = blob_manifest_new();
-  T_OK(out != NULL);
-
-  memset(&e1, 0, sizeof(e1));
-  strcpy(e1.path, "assets/textures/foo.png");
-  strcpy(e1.sha256,
-         "0000000000000000000000000000000000000000000000000000000000000001");
-  e1.size = 1234;
-  e1.mode = 0644;
-
-  memset(&e2, 0, sizeof(e2));
-  strcpy(e2.path, "assets/models/bar.obj");
-  strcpy(e2.sha256,
-         "0000000000000000000000000000000000000000000000000000000000000002");
-  e2.size = 5678;
-  e2.mode = 0755;
-
-  /* Use the public API: blob_store would also work but needs filesystem.
-   * For roundtrip we go via the in-memory manifest functions, so we manually
-   * append via the only public path: re-walk through blob_store would require
-   * actual files. Since blob_manifest_add is static, we instead test via
-   * the e2e path. For unit test we use a workaround: write a JSON file
-   * directly and read it back. */
-  (void)e1; (void)e2; (void)out;
-  blob_manifest_free(out);
-
-  /* Write a manifest manually and read it back */
-  {
-    FILE *f = fopen(path, "w");
-    fprintf(f, "{\n  \"version\": 1,\n  \"type\": \"individual\",\n  \"files\": [\n");
-    fprintf(f, "    {\"path\": \"a/b.txt\", \"sha256\": \"deadbeef00000000000000000000000000000000000000000000000000000000\", \"size\": 42, \"mode\": 420},\n");
-    fprintf(f, "    {\"path\": \"x/y.bin\", \"sha256\": \"cafebabe00000000000000000000000000000000000000000000000000000000\", \"size\": 99, \"mode\": 493}\n");
-    fprintf(f, "  ]\n}\n");
-    fclose(f);
-  }
-
-  in = blob_manifest_read(path);
-  T_OK(in != NULL);
-  if (in) {
-    T_EQ_INT(in->count, 2);
-    T_EQ_STR(in->entries[0].path, "a/b.txt");
-    T_EQ_STR(in->entries[0].sha256,
+  blob_manifest *m = blob_manifest_read(path);
+  T_OK(m != NULL);
+  if (m) {
+    T_EQ_INT(m->count, 2);
+    T_EQ_STR(m->entries[0].path, "a/b.txt");
+    T_EQ_STR(m->entries[0].sha256,
              "deadbeef00000000000000000000000000000000000000000000000000000000");
-    T_EQ_INT(in->entries[0].size, 42);
-    T_EQ_INT(in->entries[0].mode, 420);
-    T_EQ_STR(in->entries[1].path, "x/y.bin");
-    T_EQ_INT(in->entries[1].size, 99);
-    T_EQ_INT(in->entries[1].mode, 493);
-    blob_manifest_free(in);
+    T_EQ_INT(m->entries[0].size, 42);
+    T_EQ_INT(m->entries[0].mode, 420);
+    T_EQ_STR(m->entries[1].path, "x/y.bin");
+    T_EQ_INT(m->entries[1].size, 99);
+    T_EQ_INT(m->entries[1].mode, 493);
+    blob_manifest_free(m);
   }
 
   unlink(path);
@@ -437,19 +406,16 @@ static void test_manifest_roundtrip(void) {
 
 static void test_manifest_write_then_read(void) {
   /* Drive write through blob_store so we exercise the real writer. */
-  dache *d;
-  blob_manifest *m;
-  blob_manifest *roundtrip;
   char *cache = tmp_path("cache");
   char *src = tmp_path("payload.txt");
   char *manifest_path = tmp_path("snap.json");
 
   write_file(src, "hello blob world");
 
-  d = dache_new(cache, NULL);
+  dache *d = dache_new(cache, NULL);
   T_OK(d != NULL);
 
-  m = blob_manifest_new();
+  blob_manifest *m = blob_manifest_new();
   T_OK(m != NULL);
 
   T_OK(blob_store(d, src, m));
@@ -458,7 +424,7 @@ static void test_manifest_write_then_read(void) {
   T_OK(blob_manifest_write(m, manifest_path));
   T_OK(file_exists(manifest_path));
 
-  roundtrip = blob_manifest_read(manifest_path);
+  blob_manifest *roundtrip = blob_manifest_read(manifest_path);
   T_OK(roundtrip != NULL);
   if (roundtrip) {
     T_EQ_INT(roundtrip->count, 1);
@@ -483,23 +449,19 @@ static void test_manifest_escapes_special_chars(void) {
    * Regression: paths with " or \ used to break the JSON output, making
    * roundtrip fail.
    */
-  dache *d;
-  blob_manifest *m;
-  blob_manifest *roundtrip;
   char *cache = tmp_path("cache2");
-  /* A path that contains a quote and a backslash. POSIX allows these. */
   char *src = tmp_path("weird\"name\\file");
   char *manifest_path = tmp_path("snap2.json");
 
   write_file(src, "payload");
 
-  d = dache_new(cache, NULL);
-  m = blob_manifest_new();
+  dache *d = dache_new(cache, NULL);
+  blob_manifest *m = blob_manifest_new();
 
   T_OK(blob_store(d, src, m));
   T_OK(blob_manifest_write(m, manifest_path));
 
-  roundtrip = blob_manifest_read(manifest_path);
+  blob_manifest *roundtrip = blob_manifest_read(manifest_path);
   T_OK(roundtrip != NULL);
   if (roundtrip) {
     T_EQ_INT(roundtrip->count, 1);
@@ -519,27 +481,26 @@ static void test_manifest_escapes_special_chars(void) {
 
 /* ---------- expand_paths tests ---------- */
 
+static char *join_path(const char *dir, const char *name) {
+  size_t len = strlen(dir) + 1 + strlen(name) + 1;
+  char *p = malloc(len);
+  snprintf(p, len, "%s/%s", dir, name);
+  return p;
+}
+
 static void test_expand_paths_sorts(void) {
   char *dir = tmp_path("expand_dir");
-  char *a;
-  char *b;
-  char *c;
-  const char *roots[1];
-  expanded_paths *ep;
-
   mkdir(dir, 0755);
-  a = malloc(strlen(dir) + 16);
-  b = malloc(strlen(dir) + 16);
-  c = malloc(strlen(dir) + 16);
-  sprintf(a, "%s/c.txt", dir);
-  sprintf(b, "%s/a.txt", dir);
-  sprintf(c, "%s/b.txt", dir);
+
+  char *a = join_path(dir, "c.txt");
+  char *b = join_path(dir, "a.txt");
+  char *c = join_path(dir, "b.txt");
   write_file(a, "1");
   write_file(b, "2");
   write_file(c, "3");
 
-  roots[0] = dir;
-  ep = expand_paths(roots, 1);
+  const char *roots[1] = {dir};
+  expanded_paths *ep = expand_paths(roots, 1);
   T_OK(ep != NULL);
   if (ep) {
     T_EQ_INT(ep->count, 3);
@@ -561,30 +522,22 @@ static void test_expand_paths_skips_symlink_loop(void) {
    * infinite-loop.
    */
   char *dir = tmp_path("loop_dir");
-  char *child;
-  char *link;
-  const char *roots[1];
-  expanded_paths *ep;
-
   mkdir(dir, 0755);
-  child = malloc(strlen(dir) + 16);
-  sprintf(child, "%s/file.txt", dir);
+
+  char *child = join_path(dir, "file.txt");
   write_file(child, "ok");
 
-  link = malloc(strlen(dir) + 16);
-  sprintf(link, "%s/loop", dir);
   /* Symlink pointing back to parent dir; would cycle if followed. */
+  char *link = join_path(dir, "loop");
   symlink(dir, link);
 
-  roots[0] = dir;
-  ep = expand_paths(roots, 1);
+  const char *roots[1] = {dir};
+  expanded_paths *ep = expand_paths(roots, 1);
   T_OK(ep != NULL);
   if (ep) {
-    /* Must terminate. Should include file.txt; symlink must be skipped. */
-    int saw_file = 0;
-    int i;
-    for (i = 0; i < ep->count; i++) {
-      if (strstr(ep->paths[i], "file.txt")) saw_file = 1;
+    bool saw_file = false;
+    for (int i = 0; i < ep->count; i++) {
+      if (strstr(ep->paths[i], "file.txt")) saw_file = true;
     }
     T_OK(saw_file);
     expanded_paths_free(ep);
@@ -604,22 +557,17 @@ static void test_archive_roundtrip(void) {
    * relative output paths it later extracts into the cwd.
    */
   char *work = tmp_path("arch_work");
-  char *cwd_before;
-  char *archive;
-  const char *srcs[3];
-
   mkdir(work, 0755);
-  cwd_before = getcwd(NULL, 0);
+
+  char *cwd_before = getcwd(NULL, 0);
   T_EQ_INT(chdir(work), 0);
 
   mkdir("build", 0755);
   write_file("build/a.txt", "alpha");
   write_file("build/b.txt", "bravo");
 
-  archive = tmp_path("out.tar.gz");
-  srcs[0] = "build/a.txt";
-  srcs[1] = "build/b.txt";
-  srcs[2] = NULL;
+  char *archive = tmp_path("out.tar.gz");
+  const char *srcs[] = {"build/a.txt", "build/b.txt", NULL};
 
   T_OK(write_archive(srcs, archive));
   T_OK(file_exists(archive));
@@ -649,10 +597,7 @@ static void test_archive_missing_file_fails(void) {
    * source failed.
    */
   char *archive = tmp_path("bad.tar.gz");
-  const char *srcs[2];
-
-  srcs[0] = "/definitely/does/not/exist/zzz";
-  srcs[1] = NULL;
+  const char *srcs[] = {"/definitely/does/not/exist/zzz", NULL};
 
   T_OK(!write_archive(srcs, archive));
   T_OK(!file_exists(archive));
@@ -680,7 +625,7 @@ int main(void) {
   RUN(test_key_command_order_matters);
   RUN(test_key_binary_input);
 
-  RUN(test_manifest_roundtrip);
+  RUN(test_manifest_read_known_json);
   RUN(test_manifest_write_then_read);
   RUN(test_manifest_escapes_special_chars);
 

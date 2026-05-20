@@ -13,16 +13,7 @@
 #include "dache.h"
 
 bool write_archive(const char **src, const char *dest) {
-  struct archive *a;
-  struct archive_entry *entry;
-  struct stat st;
-  char buff[8192];
-  ssize_t len;
-  la_ssize_t written;
-  int fd;
-  bool ok;
-
-  a = archive_write_new();
+  struct archive *a = archive_write_new();
 
   if (!a) {
     return false;
@@ -43,7 +34,7 @@ bool write_archive(const char **src, const char *dest) {
     return false;
   }
 
-  entry = archive_entry_new();
+  struct archive_entry *entry = archive_entry_new();
 
   if (!entry) {
     archive_write_close(a);
@@ -51,16 +42,18 @@ bool write_archive(const char **src, const char *dest) {
     return false;
   }
 
-  ok = true;
+  bool ok = true;
 
-  while (*src && ok) {
+  for (; *src && ok; src++) {
+    struct stat st;
+
     if (stat(*src, &st) != 0) {
       fprintf(stderr, "[dache] cannot stat '%s' for archive\n", *src);
       ok = false;
       break;
     }
 
-    fd = open(*src, O_RDONLY);
+    int fd = open(*src, O_RDONLY);
 
     if (fd < 0) {
       fprintf(stderr, "[dache] cannot open '%s' for archive\n", *src);
@@ -81,10 +74,11 @@ bool write_archive(const char **src, const char *dest) {
       break;
     }
 
-    while ((len = read(fd, buff, sizeof(buff))) > 0) {
-      written = archive_write_data(a, buff, (size_t)len);
+    uint8_t buff[8192];
+    ssize_t len;
 
-      if (written < 0) {
+    while ((len = read(fd, buff, sizeof(buff))) > 0) {
+      if (archive_write_data(a, buff, (size_t)len) < 0) {
         fprintf(stderr, "[dache] archive write failed for '%s': %s\n", *src,
                 archive_error_string(a));
         ok = false;
@@ -99,7 +93,6 @@ bool write_archive(const char **src, const char *dest) {
 
     close(fd);
     archive_entry_clear(entry);
-    src++;
   }
 
   archive_entry_free(entry);
@@ -147,21 +140,16 @@ static int copy_data(struct archive *ar, struct archive *aw) {
 }
 
 bool unarchive(const char *src, const char *dest) {
-  struct archive *a;
-  struct archive *ext;
-  struct archive_entry *entry;
-  int r;
-  int flags;
-
   /* TODO: support extracting to specific directory */
   (void)dest;
 
-  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |
-          ARCHIVE_EXTRACT_SECURE_NODOTDOT | ARCHIVE_EXTRACT_SECURE_SYMLINKS |
-          ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
+  int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |
+              ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+              ARCHIVE_EXTRACT_SECURE_SYMLINKS |
+              ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
 
-  a = archive_read_new();
-  ext = archive_write_disk_new();
+  struct archive *a = archive_read_new();
+  struct archive *ext = archive_write_disk_new();
 
   if (!a || !ext) {
     if (a) {
@@ -170,6 +158,7 @@ bool unarchive(const char *src, const char *dest) {
     if (ext) {
       archive_write_free(ext);
     }
+
     return false;
   }
 
@@ -181,17 +170,18 @@ bool unarchive(const char *src, const char *dest) {
     src = NULL;
   }
 
-  r = archive_read_open_filename(a, src, 10240);
+  bool ok = true;
 
-  if (r) {
+  if (archive_read_open_filename(a, src, 10240) != ARCHIVE_OK) {
     fprintf(stderr, "%s\n", archive_error_string(a));
-    archive_read_free(a);
-    archive_write_free(ext);
-    return false;
+    ok = false;
+
+    goto cleanup;
   }
 
   for (;;) {
-    r = archive_read_next_header(a, &entry);
+    struct archive_entry *entry;
+    int r = archive_read_next_header(a, &entry);
 
     if (r == ARCHIVE_EOF) {
       break;
@@ -199,37 +189,29 @@ bool unarchive(const char *src, const char *dest) {
 
     if (r != ARCHIVE_OK) {
       fprintf(stderr, "%s\n", archive_error_string(a));
-      return false;
+      ok = false;
+      break;
     }
 
-    r = archive_write_header(ext, entry);
-
-    if (r != ARCHIVE_OK) {
+    if (archive_write_header(ext, entry) != ARCHIVE_OK) {
       fprintf(stderr, "%s\n", archive_error_string(ext));
-      archive_read_close(a);
-      archive_read_free(a);
-      archive_write_close(ext);
-      archive_write_free(ext);
-      return false;
+      ok = false;
+      break;
     }
 
-    r = copy_data(a, ext);
-
-    if (r != ARCHIVE_OK) {
-      archive_read_close(a);
-      archive_read_free(a);
-      archive_write_close(ext);
-      archive_write_free(ext);
-      return false;
+    if (copy_data(a, ext) != ARCHIVE_OK) {
+      ok = false;
+      break;
     }
   }
 
   archive_read_close(a);
-  archive_read_free(a);
   archive_write_close(ext);
-  archive_write_free(ext);
 
-  return true;
+cleanup:
+  archive_read_free(a);
+  archive_write_free(ext);
+  return ok;
 }
 
 bool compress_file(const char *src, const char *dest) {

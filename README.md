@@ -164,9 +164,10 @@ It does not try to "infer" what dotfiles your build tool implicitly touches by l
 
 ## Technical Notes
 
-- Written in portable C89 for maximum compatibility
-- Uses POSIX extensions (`strdup`, etc.) via `_POSIX_C_SOURCE`
-- No external dependencies beyond libarchive, OpenSSL, and zlib
+- Written in C11 with POSIX extensions (`strdup`, `lstat`, …) enabled
+  via `_POSIX_C_SOURCE`.
+- No external dependencies beyond libarchive, OpenSSL, and zlib.
+- Tests: `make test` (C unit tests) and `make e2e` (shell end-to-end).
 
 ## License
 
