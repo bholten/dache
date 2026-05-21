@@ -1293,21 +1293,18 @@ static const char *json_parse_number(const char *p, long *out) {
   return end;
 }
 
-blob_manifest *blob_manifest_read(const char *path) {
-  blob_entry entry;
-  char key[64];
-  long val;
-
-  char *json = json_read_file(path);
-
+blob_manifest *blob_manifest_parse(const char *json) {
   if (!json) {
     return NULL;
   }
 
+  blob_entry entry;
+  char key[64];
+  long val;
+
   blob_manifest *m = blob_manifest_new();
 
   if (!m) {
-    free(json);
     return NULL;
   }
 
@@ -1315,8 +1312,7 @@ blob_manifest *blob_manifest_read(const char *path) {
   const char *vp = strstr(p, "\"version\"");
 
   if (!vp) {
-    fprintf(stderr, "[dache] manifest missing \"version\" field: %s\n", path);
-    free(json);
+    fprintf(stderr, "[dache] manifest missing \"version\" field\n");
     blob_manifest_free(m);
     return NULL;
   }
@@ -1324,9 +1320,7 @@ blob_manifest *blob_manifest_read(const char *path) {
   vp = strchr(vp, ':');
 
   if (!vp) {
-    fprintf(stderr, "[dache] manifest \"version\" field is malformed: %s\n",
-            path);
-    free(json);
+    fprintf(stderr, "[dache] manifest \"version\" field is malformed\n");
     blob_manifest_free(m);
     return NULL;
   }
@@ -1336,10 +1330,8 @@ blob_manifest *blob_manifest_read(const char *path) {
 
   if (version != MANIFEST_VERSION) {
     fprintf(stderr,
-            "[dache] manifest version %ld is not supported "
-            "(expected %d): %s\n",
-            version, MANIFEST_VERSION, path);
-    free(json);
+            "[dache] manifest version %ld is not supported (expected %d)\n",
+            version, MANIFEST_VERSION);
     blob_manifest_free(m);
     return NULL;
   }
@@ -1347,7 +1339,6 @@ blob_manifest *blob_manifest_read(const char *path) {
   p = strstr(p, "\"files\"");
 
   if (!p) {
-    free(json);
     blob_manifest_free(m);
     return NULL;
   }
@@ -1355,7 +1346,6 @@ blob_manifest *blob_manifest_read(const char *path) {
   p = strchr(p, '[');
 
   if (!p) {
-    free(json);
     blob_manifest_free(m);
     return NULL;
   }
@@ -1364,6 +1354,15 @@ blob_manifest *blob_manifest_read(const char *path) {
 
   while (*p) {
     p = json_skip_ws(p);
+
+    /*
+     * Bugfix: skip_ws can advance p to the buffer's NUL
+     * terminator. Without this guard, the `if (*p != '{') p++` branch
+     * below walks one byte past the buffer. Found by libFuzzer.
+     */
+    if (!*p) {
+      break;
+    }
 
     if (*p == ']') {
       break;
@@ -1385,6 +1384,10 @@ blob_manifest *blob_manifest_read(const char *path) {
 
     while (*p && *p != '}') {
       p = json_skip_ws(p);
+
+      if (!*p) {
+        break;
+      }
 
       if (*p == '}') {
         break;
@@ -1425,6 +1428,19 @@ blob_manifest *blob_manifest_read(const char *path) {
         p = json_parse_number(p, &val);
         entry.mode = (int)val;
       }
+
+      /*
+       * Bugfix: json_parse_string returns NULL when the value isn't a
+       * quoted string (e.g. {"path": 42}). Without this check, the
+       * next loop iteration dereferences NULL.
+       */
+      if (!p) {
+        break;
+      }
+    }
+
+    if (!p) {
+      break;
     }
 
     if (*p == '}') {
@@ -1435,6 +1451,18 @@ blob_manifest *blob_manifest_read(const char *path) {
       blob_manifest_add(m, &entry);
     }
   }
+
+  return m;
+}
+
+blob_manifest *blob_manifest_read(const char *path) {
+  char *json = json_read_file(path);
+
+  if (!json) {
+    return NULL;
+  }
+
+  blob_manifest *m = blob_manifest_parse(json);
 
   free(json);
   return m;
