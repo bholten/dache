@@ -16,6 +16,13 @@
 #define DEFAULT_CACHE_DIR ".cache/dache"
 #define DEFAULT_HOOKS_DIR ".config/dache/hooks"
 
+/*
+ * On-disk format version for the snapshot manifest JSON. Bump only
+ * when the schema changes in a way old readers can't safely
+ * parse. The reader rejects any other value rather than guessing.
+ */
+#define MANIFEST_VERSION 1
+
 static char *get_default_cache_dir(void) {
   const char *home = getenv("HOME");
 
@@ -1100,7 +1107,7 @@ bool blob_manifest_write(const blob_manifest *m, const char *path) {
     ok = false;
   }
 
-  if (ok && fprintf(f, "  \"version\": 1,\n") < 0) {
+  if (ok && fprintf(f, "  \"version\": %d,\n", MANIFEST_VERSION) < 0) {
     ok = false;
   }
 
@@ -1305,6 +1312,38 @@ blob_manifest *blob_manifest_read(const char *path) {
   }
 
   const char *p = json;
+  const char *vp = strstr(p, "\"version\"");
+
+  if (!vp) {
+    fprintf(stderr, "[dache] manifest missing \"version\" field: %s\n", path);
+    free(json);
+    blob_manifest_free(m);
+    return NULL;
+  }
+
+  vp = strchr(vp, ':');
+
+  if (!vp) {
+    fprintf(stderr, "[dache] manifest \"version\" field is malformed: %s\n",
+            path);
+    free(json);
+    blob_manifest_free(m);
+    return NULL;
+  }
+
+  long version;
+  vp = json_parse_number(vp + 1, &version);
+
+  if (version != MANIFEST_VERSION) {
+    fprintf(stderr,
+            "[dache] manifest version %ld is not supported "
+            "(expected %d): %s\n",
+            version, MANIFEST_VERSION, path);
+    free(json);
+    blob_manifest_free(m);
+    return NULL;
+  }
+
   p = strstr(p, "\"files\"");
 
   if (!p) {

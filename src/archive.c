@@ -13,6 +13,19 @@
 
 #include "dache.h"
 
+/*
+ * Sentinel pathname written as the FIRST entry in every
+ * dache-produced archive. The version number lives in the name so
+ * that a future v2 format can be rejected cleanly by v1 readers (and
+ * vice versa) without having to read the entry's body.
+ *
+ * On extract we recognize this entry, skip its (zero-byte) data, and
+ * do NOT write it to disk — otherwise users would get a stray
+ * __dache_format_v1 file in their working directory after every cache
+ * hit.
+ */
+#define ARCHIVE_VERSION_MARKER "__dache_format_v1"
+
 bool write_archive(const char **src, const char *dest) {
   /*
    * Bugfix: Write to <dest>.tmp.<pid> then atomically rename to
@@ -60,6 +73,23 @@ bool write_archive(const char **src, const char *dest) {
   }
 
   bool ok = true;
+
+  archive_entry_set_pathname(entry, ARCHIVE_VERSION_MARKER);
+  archive_entry_set_size(entry, 0);
+  archive_entry_set_filetype(entry, AE_IFREG);
+  archive_entry_set_perm(entry, 0644);
+
+  if (archive_write_header(a, entry) != ARCHIVE_OK) {
+    fprintf(stderr, "[dache] archive header failed for version marker: %s\n",
+            archive_error_string(a));
+    archive_entry_free(entry);
+    archive_write_close(a);
+    archive_write_free(a);
+    unlink(tmp_path);
+    return false;
+  }
+
+  archive_entry_clear(entry);
 
   for (; *src && ok; src++) {
     struct stat st;
@@ -203,29 +233,58 @@ bool unarchive(const char *src, const char *dest) {
     goto cleanup;
   }
 
-  for (;;) {
-    struct archive_entry *entry;
-    int r = archive_read_next_header(a, &entry);
+  /*
+   * The first entry MUST be our format-version marker; otherwise this
+   * either isn't a dache archive or comes from an incompatible
+   * version.  Refusing here is safer than half-extracting unknown
+   * content.
+   */
+  struct archive_entry *entry;
+  int r = archive_read_next_header(a, &entry);
 
-    if (r == ARCHIVE_EOF) {
-      break;
-    }
+  if (r == ARCHIVE_EOF) {
+    fprintf(stderr, "[dache] archive is empty: %s\n",
+            src ? src : "(stdin)");
+    ok = false;
+  } else if (r != ARCHIVE_OK) {
+    fprintf(stderr, "%s\n", archive_error_string(a));
+    ok = false;
+  } else {
+    const char *first_name = archive_entry_pathname(entry);
 
-    if (r != ARCHIVE_OK) {
-      fprintf(stderr, "%s\n", archive_error_string(a));
+    if (!first_name || strcmp(first_name, ARCHIVE_VERSION_MARKER) != 0) {
+      fprintf(stderr,
+              "[dache] archive missing format marker (first entry: '%s'); "
+              "expected '%s' — refusing to extract\n",
+              first_name ? first_name : "", ARCHIVE_VERSION_MARKER);
       ok = false;
-      break;
-    }
+    } else {
+      archive_read_data_skip(a);
 
-    if (archive_write_header(ext, entry) != ARCHIVE_OK) {
-      fprintf(stderr, "%s\n", archive_error_string(ext));
-      ok = false;
-      break;
-    }
+      for (;;) {
+        r = archive_read_next_header(a, &entry);
 
-    if (copy_data(a, ext) != ARCHIVE_OK) {
-      ok = false;
-      break;
+        if (r == ARCHIVE_EOF) {
+          break;
+        }
+
+        if (r != ARCHIVE_OK) {
+          fprintf(stderr, "%s\n", archive_error_string(a));
+          ok = false;
+          break;
+        }
+
+        if (archive_write_header(ext, entry) != ARCHIVE_OK) {
+          fprintf(stderr, "%s\n", archive_error_string(ext));
+          ok = false;
+          break;
+        }
+
+        if (copy_data(a, ext) != ARCHIVE_OK) {
+          ok = false;
+          break;
+        }
+      }
     }
   }
 

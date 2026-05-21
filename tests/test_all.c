@@ -444,6 +444,45 @@ static void test_manifest_write_then_read(void) {
   free(cache);
 }
 
+static void test_manifest_read_rejects_missing_version(void) {
+  /* No "version" field — reader must refuse rather than guess v1. */
+  char *path = tmp_path("manifest_no_version.json");
+  FILE *f = fopen(path, "w");
+  fprintf(f,
+          "{\n"
+          "  \"type\": \"individual\",\n"
+          "  \"files\": []\n"
+          "}\n");
+  fclose(f);
+
+  blob_manifest *m = blob_manifest_read(path);
+  T_OK(m == NULL);
+  if (m) blob_manifest_free(m);
+
+  unlink(path);
+  free(path);
+}
+
+static void test_manifest_read_rejects_unknown_version(void) {
+  /* version: 99 is a future format — reader must refuse. */
+  char *path = tmp_path("manifest_v99.json");
+  FILE *f = fopen(path, "w");
+  fprintf(f,
+          "{\n"
+          "  \"version\": 99,\n"
+          "  \"type\": \"individual\",\n"
+          "  \"files\": []\n"
+          "}\n");
+  fclose(f);
+
+  blob_manifest *m = blob_manifest_read(path);
+  T_OK(m == NULL);
+  if (m) blob_manifest_free(m);
+
+  unlink(path);
+  free(path);
+}
+
 static void test_manifest_escapes_special_chars(void) {
   /*
    * Regression: paths with " or \ used to break the JSON output, making
@@ -591,6 +630,40 @@ static void test_archive_roundtrip(void) {
   free(work);
 }
 
+static void test_archive_rejects_foreign(void) {
+  /*
+   * A tar.gz built externally (here via system `tar`) lacks our format
+   * marker. unarchive must refuse rather than extract foreign content
+   * that could collide with cwd files.
+   */
+  char *work = tmp_path("foreign_work");
+  mkdir(work, 0755);
+
+  char *cwd_before = getcwd(NULL, 0);
+  T_EQ_INT(chdir(work), 0);
+
+  write_file("hello.txt", "hi");
+
+  char *archive = tmp_path("foreign.tar.gz");
+  char cmd[1024];
+  snprintf(cmd, sizeof(cmd), "tar -czf '%s' hello.txt", archive);
+  T_EQ_INT(system(cmd), 0);
+
+  unlink("hello.txt");
+  T_OK(!unarchive(archive, "."));
+  T_OK(!file_exists("hello.txt"));
+
+  if (cwd_before) {
+    chdir(cwd_before);
+    free(cwd_before);
+  }
+
+  unlink(archive);
+  rm_rf(work);
+  free(archive);
+  free(work);
+}
+
 static void test_archive_missing_file_fails(void) {
   /*
    * Regression: write_archive used to return true even when stat() of the
@@ -627,12 +700,15 @@ int main(void) {
 
   RUN(test_manifest_read_known_json);
   RUN(test_manifest_write_then_read);
+  RUN(test_manifest_read_rejects_missing_version);
+  RUN(test_manifest_read_rejects_unknown_version);
   RUN(test_manifest_escapes_special_chars);
 
   RUN(test_expand_paths_sorts);
   RUN(test_expand_paths_skips_symlink_loop);
 
   RUN(test_archive_roundtrip);
+  RUN(test_archive_rejects_foreign);
   RUN(test_archive_missing_file_fails);
 
   cleanup_tmpdir();
