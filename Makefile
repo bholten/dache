@@ -9,20 +9,26 @@ OUT = build/dache
 TEST_SRCS = tests/test_all.c
 TEST_OUT = build/test_all
 
-# AddressSanitizer + UndefinedBehaviorSanitizer build of the binaries used
-# by `test-asan` / `e2e-asan`. -fno-sanitize-recover makes UB fatal (rather
-# than just warnings); -O1 keeps inlining sane without hiding bugs.
 SAN_FLAGS = -fsanitize=address,undefined -fno-sanitize-recover=undefined \
             -fno-omit-frame-pointer -g -O1
 SAN_OUT = build/dache-san
 SAN_TEST_OUT = build/test_all-san
 
-# Leak detection (LSan) is on: the current code is leak-free under the
-# tested paths, so any regression should surface as a CI failure.
 SAN_RUN_ENV = ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
               UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
-.PHONY: all debug release clean test e2e test-asan e2e-asan asan
+FUZZ_FLAGS = -fsanitize=fuzzer,address,undefined \
+             -fno-sanitize-recover=undefined -fno-omit-frame-pointer -g -O1
+FUZZ_MANIFEST_SRC = tests/fuzz/fuzz_manifest.c
+FUZZ_MANIFEST_OUT = build/fuzz_manifest
+
+FUZZ_MANIFEST_SEEDS = tests/fuzz/corpus/manifest
+FUZZ_MANIFEST_WORK = .cache/fuzz-corpus/manifest
+
+FUZZ_SMOKE_TIME ?= 20
+
+.PHONY: all debug release clean test e2e test-asan e2e-asan asan \
+        fuzz-manifest fuzz-manifest-smoke
 
 all: debug
 
@@ -57,6 +63,22 @@ e2e-asan: $(SAN_OUT)
 	$(SAN_RUN_ENV) DACHE_BIN=$(CURDIR)/$(SAN_OUT) tests/e2e/run.sh
 
 asan: test-asan e2e-asan
+
+$(FUZZ_MANIFEST_OUT): $(FUZZ_MANIFEST_SRC) $(LIB_SRCS) | build
+	clang $(CFLAGS) $(FUZZ_FLAGS) $(FUZZ_MANIFEST_SRC) $(LIB_SRCS) $(LDFLAGS) \
+	      -o $(FUZZ_MANIFEST_OUT)
+
+fuzz-manifest: $(FUZZ_MANIFEST_OUT)
+	@mkdir -p $(FUZZ_MANIFEST_WORK)
+	$(SAN_RUN_ENV) ./$(FUZZ_MANIFEST_OUT) \
+	    $(FUZZ_MANIFEST_WORK) $(FUZZ_MANIFEST_SEEDS) \
+	    -max_total_time=$${FUZZ_TIME:-60}
+
+fuzz-manifest-smoke: $(FUZZ_MANIFEST_OUT)
+	@mkdir -p build/fuzz-corpus-smoke
+	$(SAN_RUN_ENV) ./$(FUZZ_MANIFEST_OUT) \
+	    build/fuzz-corpus-smoke $(FUZZ_MANIFEST_SEEDS) \
+	    -max_total_time=$(FUZZ_SMOKE_TIME)
 
 build:
 	mkdir -p build

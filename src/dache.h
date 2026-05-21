@@ -69,6 +69,8 @@ typedef struct {
 blob_manifest *blob_manifest_new(void);
 void blob_manifest_free(blob_manifest *m);
 blob_manifest *blob_manifest_read(const char *path);
+
+blob_manifest *blob_manifest_parse(const char *json);
 bool blob_manifest_write(const blob_manifest *m, const char *path);
 
 bool blob_store(dache *d, const char *path, blob_manifest *m);

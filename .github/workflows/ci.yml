@@ -43,3 +43,16 @@ jobs:
 
       - name: ASan+UBSan+LSan suite
         run: make asan CC=clang
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-dev libssl-dev zlib1g-dev
+
+      - name: fuzz_manifest smoke (20s)
+        run: make fuzz-manifest-smoke
