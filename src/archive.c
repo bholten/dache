@@ -243,8 +243,7 @@ bool unarchive(const char *src, const char *dest) {
   int r = archive_read_next_header(a, &entry);
 
   if (r == ARCHIVE_EOF) {
-    fprintf(stderr, "[dache] archive is empty: %s\n",
-            src ? src : "(stdin)");
+    fprintf(stderr, "[dache] archive is empty: %s\n", src ? src : "(stdin)");
     ok = false;
   } else if (r != ARCHIVE_OK) {
     fprintf(stderr, "%s\n", archive_error_string(a));
